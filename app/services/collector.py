@@ -57,7 +57,7 @@ def collect(
     location: str,
     radius_km: Optional[float] = None,
     max_results: Optional[int] = None,
-    page_size: int = 90,
+    page_size: int = 20,
     max_retries: int = 3,
     sleep: Callable[[float], None] = time.sleep,
 ) -> Tuple[list[dict], Optional[Exception], dict]:
