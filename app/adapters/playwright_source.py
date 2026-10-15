@@ -129,6 +129,10 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
         self.target_cap = target_cap
         self.scroll_delay = scroll_delay if scroll_delay is not None else _env_float("PLAYWRIGHT_SCROLL_DELAY", 0.6)
         self.detail_pause = detail_pause if detail_pause is not None else _env_float("PLAYWRIGHT_DETAIL_PAUSE", 0.4)
+        # Generous timeouts: free-tier containers render slowly; a timed-out
+        # click used to drop the whole card (see enrich loop below).
+        self.click_timeout = _env_int("PLAYWRIGHT_CLICK_TIMEOUT", 8000)
+        self.detail_timeout = _env_int("PLAYWRIGHT_DETAIL_TIMEOUT", 8000)
 
     def _pause(self, mult: float = 1.0) -> None:
         time.sleep(self.pause_sec * mult)
@@ -300,12 +304,17 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
                         anchors = page.query_selector_all("a.hfpxzc")
                         if i >= len(anchors):
                             break
-                        anchors[i].click(timeout=4000)
+                        anchors[i].click(timeout=self.click_timeout)
                         time.sleep(self.detail_pause)
                         try:
-                            page.wait_for_selector("h1.DUwDvf", timeout=4000)
+                            page.wait_for_selector("h1.DUwDvf", timeout=self.detail_timeout)
                         except PlaywrightError:
-                            pass
+                            # Slow render: one retry before reading a possibly empty pane.
+                            time.sleep(self.detail_pause)
+                            try:
+                                page.wait_for_selector("h1.DUwDvf", timeout=self.detail_timeout)
+                            except PlaywrightError:
+                                pass
                         detail = self._read_detail_pane(page)
                         merged = {**card, **{k: v for k, v in detail.items() if v is not None}}
                         if not merged.get("business_name"):
@@ -324,13 +333,26 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
                         try:
                             back = page.query_selector("button[aria-label='Back']")
                             if back:
-                                back.click(timeout=2000)
+                                back.click(timeout=self.click_timeout)
                                 time.sleep(0.3)
                         except Exception:
                             pass
                     except Exception as exc:
                         logger.debug("Detail enrich %d failed: %s", i, exc)
-                        continue
+                        # Keep the list-level snapshot instead of dropping the card.
+                        snapshot = {k: v for k, v in card.items() if v is not None}
+                        snapshot.pop("_href", None)
+                        snapshot["category"] = snapshot.get("category") or query
+                        if snapshot.get("business_name"):
+                            records.append(snapshot)
+                        # Try to return to the list so the next card starts clean.
+                        try:
+                            back = page.query_selector("button[aria-label='Back']")
+                            if back:
+                                back.click(timeout=self.click_timeout)
+                                time.sleep(0.3)
+                        except Exception:
+                            pass
 
                 logger.info("Scraped %d enriched records for %r", len(records), search)
                 return records
