@@ -334,23 +334,60 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
                         continue
 
                 # Enrich each card by opening its detail pane.
+                prev_title: str | None = None
                 for i, card in enumerate(cards):
                     try:
                         anchors = page.query_selector_all("a.hfpxzc")
                         if i >= len(anchors):
                             break
+                        # Snapshot the currently shown listing so we can tell
+                        # whether the pane actually advanced after the click.
+                        # (Waiting for h1 *presence* is not enough: the old
+                        # listing's h1 satisfies it instantly, yielding the
+                        # previous card's data merged into this one.)
+                        try:
+                            _h1 = page.query_selector("h1.DUwDvf")
+                            prev_title = (_h1.inner_text().strip() if _h1 else None) or None
+                        except Exception:
+                            prev_title = None
                         anchors[i].click(timeout=self.click_timeout)
                         time.sleep(self.detail_pause)
                         try:
-                            page.wait_for_selector("h1.DUwDvf", timeout=self.detail_timeout)
+                            page.wait_for_function(
+                                """(prev) => {
+                                    const el = document.querySelector('h1.DUwDvf');
+                                    const t = el ? el.innerText.trim() : '';
+                                    return t !== '' && t !== prev;
+                                }""",
+                                arg=prev_title or "",
+                                timeout=self.detail_timeout,
+                            )
                         except PlaywrightError:
-                            # Slow render: one retry before reading a possibly empty pane.
+                            # Slow render: one retry before reading the pane.
                             time.sleep(self.detail_pause)
                             try:
-                                page.wait_for_selector("h1.DUwDvf", timeout=self.detail_timeout)
+                                page.wait_for_function(
+                                    """(prev) => {
+                                        const el = document.querySelector('h1.DUwDvf');
+                                        const t = el ? el.innerText.trim() : '';
+                                        return t !== '' && t !== prev;
+                                    }""",
+                                    arg=prev_title or "",
+                                    timeout=self.detail_timeout,
+                                )
                             except PlaywrightError:
                                 pass
                         detail = self._read_detail_pane(page)
+                        if (
+                            detail.get("business_name")
+                            and prev_title
+                            and detail["business_name"] == prev_title
+                            and (card.get("business_name") or "") != prev_title
+                        ):
+                            # Pane never advanced: stale data would duplicate
+                            # the previous listing, so keep the snapshot only.
+                            logger.debug("Detail pane stuck on %r; using snapshot", prev_title)
+                            detail = {}
                         merged = {**card, **{k: v for k, v in detail.items() if v is not None}}
                         if not merged.get("business_name"):
                             merged["business_name"] = card.get("business_name")
