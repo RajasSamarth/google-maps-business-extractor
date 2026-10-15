@@ -358,12 +358,21 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
                         lat, lng = _parse_latlng(href or "")
                         rating, reviews = None, None
                         try:
+                            # Nearest ancestor containing this card's own name
+                            # plus a rating pair — climbing a fixed height can
+                            # overshoot into a container shared by many cards.
                             card_text = a.evaluate(
-                                """(el) => {
-                                    let n = el;
-                                    for (let i = 0; i < 6 && n; i++) n = n.parentElement;
-                                    return n ? n.innerText : '';
-                                }"""
+                                """(el, nm) => {
+                                    if (!nm) return '';
+                                    let n = el.parentElement, best = '';
+                                    while (n && n !== document.body) {
+                                        const t = n.innerText || '';
+                                        if (t.includes(nm) && /(\d[.,]\d)\s*\(([\d,]+)\)/.test(t)) { best = t; break; }
+                                        n = n.parentElement;
+                                    }
+                                    return best;
+                                }""",
+                                name,
                             ) or ""
                             rating, reviews = _parse_card_rating(card_text)
                         except Exception:
