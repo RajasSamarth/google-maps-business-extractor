@@ -229,9 +229,17 @@ def run_job(job_id: str) -> None:
             total_results=len(cleaned),
         )
 
-        file_path = export_to_excel(cleaned, info, output_dir=_output_dir())
+        # Keep records on the job BEFORE exporting, so a failed export
+        # (e.g. an over-long file name) still leaves previewable results.
         job.records = cleaned
         job.total_results = len(cleaned)
+
+        if len(locations) > 1:
+            file_label = f"{locations[0]} + {len(locations) - 1} areas"
+        else:
+            file_label = locations[0]
+        file_path = export_to_excel(cleaned, info, output_dir=_output_dir(),
+                                    filename_location=file_label)
         job.file_path = str(file_path)
 
         # Cache the finished result for 24 hours.

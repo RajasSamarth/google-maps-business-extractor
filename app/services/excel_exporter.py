@@ -64,8 +64,8 @@ def sanitize_filename_part(value: str) -> str:
 
 
 def build_filename(query: str, location: str, when: date | None = None) -> str:
-    q = sanitize_filename_part(query)
-    loc = sanitize_filename_part(location)
+    q = sanitize_filename_part(query)[:30]
+    loc = sanitize_filename_part(location)[:60]
     day = (when or date.today()).isoformat()
     return f"{q}_{loc}_{day}.xlsx"
 
@@ -103,10 +103,12 @@ def _row_from_record(index: int, record) -> list:
     ]
 
 
-def export_to_excel(records, search_info, output_dir="output") -> Path:
+def export_to_excel(records, search_info, output_dir="output", filename_location=None) -> Path:
     """Create an .xlsx file from records and search metadata.
 
-    Returns the path to the generated file.
+    ``filename_location`` optionally overrides the location text used only
+    for the file name (multi-area searches would otherwise produce
+    over-long file names). Returns the path to the generated file.
     """
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -124,7 +126,9 @@ def export_to_excel(records, search_info, output_dir="output") -> Path:
         )
 
     records_list = list(records or [])
-    filename = build_filename(info.query, info.location)
+    name_query = info.query
+    name_location = filename_location if filename_location else info.location
+    filename = build_filename(name_query, name_location)
     file_path = output_path / filename
 
     wb = Workbook()
