@@ -10,6 +10,7 @@ Polite pauses + per-minute rate limiting are built in; no CAPTCHA bypass.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import random
@@ -18,8 +19,8 @@ import time
 from typing import List, Optional, Tuple
 from urllib.parse import quote_plus
 
-from playwright.sync_api import sync_playwright
-from playwright.sync_api import Error as PlaywrightError
+from playwright.async_api import async_playwright
+from playwright.async_api import Error as PlaywrightError
 
 from app.adapters.approved_source import BusinessDataSource
 
@@ -224,12 +225,13 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
             )
         # Cache miss: scrape only what this job needs (one browser launch
         # covers every page via the cache), not a hardcoded 500.
-        records, feed_exhausted = self._scrape(query, location, target)
+        # _scrape is async (parallel detail pages); run it to completion here.
+        records, feed_exhausted = asyncio.run(self._scrape(query, location, target))
         _LIST_CACHE[key] = (now, records, feed_exhausted)
         return records
 
     # -- core scrape --------------------------------------------------------
-    def _scrape(self, query: str, location: str, target: int) -> tuple[list[dict], bool]:
+    async def _scrape(self, query: str, location: str, target: int) -> tuple[list[dict], bool]:
         search = f"{query} {location}".strip()
         url = f"https://www.google.com/maps/search/{quote_plus(search)}"
         logger.info("Playwright scraping %r (target %d)", search, target)
@@ -237,15 +239,19 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
         # True when the feed gave us everything it had (stopped growing on
         # its own) as opposed to stopping because we hit `target`.
         feed_exhausted = True
+        # Detail pages are enriched N at a time (default 4): each card gets
+        # its own tab navigated straight to its Maps URL — no click/back
+        # choreography, so panes can never go stale.
+        concurrency = max(1, _env_int("PLAYWRIGHT_CONCURRENCY", 4))
 
-        with sync_playwright() as pw:
-            browser = pw.chromium.launch(
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(
                 headless=self.headless,
                 args=["--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage",
                       "--no-sandbox", "--disable-gpu"],
             )
             try:
-                context = browser.new_context(
+                context = await browser.new_context(
                     locale="en-IN",
                     user_agent=(
                         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -256,30 +262,33 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
                 )
                 # Block images/fonts/media: Maps list + detail work without them.
                 try:
-                    context.route(
+                    async def _block(route) -> None:
+                        await route.abort()
+
+                    await context.route(
                         "**/*.{png,jpg,jpeg,gif,webp,svg,ico,woff,woff2,ttf,mp4,webm}",
-                        lambda route: route.abort(),
+                        _block,
                     )
                 except Exception:
                     pass
-                page = context.new_page()
-                page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                self._pause(0.8)
+                page = await context.new_page()
+                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                await asyncio.sleep(self.pause_sec * 0.8)
 
                 # Dismiss consent dialog if present.
                 for sel in ("button:has-text('Accept all')", "button:has-text('Accept')"):
                     try:
-                        btn = page.query_selector(sel)
+                        btn = await page.query_selector(sel)
                         if btn:
-                            btn.click(timeout=2000)
-                            self._pause(0.4)
+                            await btn.click(timeout=2000)
+                            await asyncio.sleep(self.pause_sec * 0.4)
                             break
                     except Exception:
                         pass
 
                 # Wait for either the list feed or a single-place detail pane.
                 try:
-                    page.wait_for_selector(
+                    await page.wait_for_selector(
                         "div[role='feed'], a.hfpxzc, h1.DUwDvf", timeout=15000
                     )
                 except PlaywrightError:
@@ -287,12 +296,12 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
                     return [], True
 
                 # Single-place result (no feed): enrich directly.
-                if not page.query_selector("div[role='feed']") and page.query_selector("h1.DUwDvf"):
-                    rec = self._read_detail_pane(page)
+                if not await page.query_selector("div[role='feed']") and await page.query_selector("h1.DUwDvf"):
+                    rec = await self._read_detail_pane(page)
                     rec["category"] = rec.get("category") or query
                     return [rec], True
 
-                feed = page.query_selector("div[role='feed']")
+                feed = await page.query_selector("div[role='feed']")
                 if feed is None:
                     logger.warning("Feed missing for %r", search)
                     return [], True
@@ -300,7 +309,7 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
                 # Scroll the feed until it stops growing (full result set)
                 # or we hit the safety cap. Cap scales with target so a
                 # max_results=5 job does ~12 scrolls, not 120.
-                links = page.query_selector_all("a.hfpxzc")
+                links = await page.query_selector_all("a.hfpxzc")
                 stable = 0
                 stable_needed = _env_int("PLAYWRIGHT_SCROLL_STABLE", 6)
                 scroll_cap = min(120, max(12, (target // 3) + 8))
@@ -310,31 +319,31 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
                         break
                     prev = len(links)
                     try:
-                        page.evaluate(
+                        await page.evaluate(
                             "(el) => el.scrollTo(0, el.scrollHeight)",
                             feed,
                         )
                     except Exception:
                         break
-                    time.sleep(self.scroll_delay)
-                    links = page.query_selector_all("a.hfpxzc")
+                    await asyncio.sleep(self.scroll_delay)
+                    links = await page.query_selector_all("a.hfpxzc")
                     if len(links) <= prev:
                         stable += 1
                         if stable == 3:
                             # Nudge up then down to retrigger lazy loading;
                             # broad feeds often stall before their true end.
                             try:
-                                page.evaluate(
+                                await page.evaluate(
                                     "(el) => el.scrollTo(0, Math.max(0, el.scrollHeight - 1200))",
                                     feed,
                                 )
-                                time.sleep(self.scroll_delay)
-                                page.evaluate(
+                                await asyncio.sleep(self.scroll_delay)
+                                await page.evaluate(
                                     "(el) => el.scrollTo(0, el.scrollHeight)",
                                     feed,
                                 )
-                                time.sleep(self.scroll_delay)
-                                links = page.query_selector_all("a.hfpxzc")
+                                await asyncio.sleep(self.scroll_delay)
+                                links = await page.query_selector_all("a.hfpxzc")
                                 if len(links) > prev:
                                     stable = 0
                                     continue
@@ -350,18 +359,18 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
                 cards: list[dict] = []
                 for a in links[:target]:
                     try:
-                        href = a.get_attribute("href") or None
-                        name = (a.get_attribute("aria-label") or "").strip() or None
+                        href = await a.get_attribute("href") or None
+                        name = (await a.get_attribute("aria-label") or "").strip() or None
                         if not name:
-                            el = a.query_selector("div.fontHeadlineSmall")
-                            name = el.inner_text().strip() if el else None
+                            el = await a.query_selector("div.fontHeadlineSmall")
+                            name = (await el.inner_text()).strip() if el else None
                         lat, lng = _parse_latlng(href or "")
                         rating, reviews = None, None
                         try:
                             # Nearest ancestor containing this card's own name
                             # plus a rating pair — climbing a fixed height can
                             # overshoot into a container shared by many cards.
-                            card_text = a.evaluate(
+                            card_text = await a.evaluate(
                                 """(el, nm) => {
                                     if (!nm) return '';
                                     let n = el.parentElement, best = '';
@@ -398,133 +407,96 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
                     logger.info("Scraped %d list-level records for %r (fast mode)", len(records), search)
                     return records, feed_exhausted
 
-                # Enrich each card by opening its detail pane.
-                prev_title: str | None = None
-                for i, card in enumerate(cards):
+                # Enrich cards in parallel: each gets its own tab navigated
+                # straight to its Maps URL (no click/back choreography, so a
+                # pane can never go stale). Concurrency via env, default 4.
+                sema = asyncio.Semaphore(concurrency)
+
+                def _snapshot(card: dict) -> dict | None:
+                    snap = {k: v for k, v in card.items() if v is not None}
+                    snap.pop("_href", None)
+                    snap["category"] = snap.get("category") or query
+                    return snap if snap.get("business_name") else None
+
+                async def _enrich_one(card: dict, idx: int) -> dict | None:
+                    href = card.get("_href") or card.get("google_maps_link")
+                    if not href:
+                        return _snapshot(card)
+                    dpage = await context.new_page()
                     try:
-                        anchors = page.query_selector_all("a.hfpxzc")
-                        if i >= len(anchors):
-                            break
-                        # Snapshot the currently shown listing so we can tell
-                        # whether the pane actually advanced after the click.
-                        # (Waiting for h1 *presence* is not enough: the old
-                        # listing's h1 satisfies it instantly, yielding the
-                        # previous card's data merged into this one.)
+                        await dpage.goto(href, wait_until="domcontentloaded", timeout=30000)
                         try:
-                            _h1 = page.query_selector("h1.DUwDvf")
-                            prev_title = (_h1.inner_text().strip() if _h1 else None) or None
-                        except Exception:
-                            prev_title = None
-                        anchors[i].click(timeout=self.click_timeout)
-                        time.sleep(self.detail_pause)
-                        try:
-                            page.wait_for_function(
-                                """(prev) => {
-                                    const el = document.querySelector('h1.DUwDvf');
-                                    const t = el ? el.innerText.trim() : '';
-                                    return t !== '' && t !== prev;
-                                }""",
-                                arg=prev_title or "",
-                                timeout=self.detail_timeout,
-                            )
+                            await dpage.wait_for_selector("h1.DUwDvf", timeout=self.detail_timeout)
                         except PlaywrightError:
-                            # Slow render: one retry before reading the pane.
-                            time.sleep(self.detail_pause)
-                            try:
-                                page.wait_for_function(
-                                    """(prev) => {
-                                        const el = document.querySelector('h1.DUwDvf');
-                                        const t = el ? el.innerText.trim() : '';
-                                        return t !== '' && t !== prev;
-                                    }""",
-                                    arg=prev_title or "",
-                                    timeout=self.detail_timeout,
-                                )
-                            except PlaywrightError:
-                                pass
-                        detail = self._read_detail_pane(page)
-                        if (
-                            detail.get("business_name")
-                            and prev_title
-                            and detail["business_name"] == prev_title
-                            and (card.get("business_name") or "") != prev_title
-                        ):
-                            # Pane never advanced: stale data would duplicate
-                            # the previous listing, so keep the snapshot only.
-                            logger.debug("Detail pane stuck on %r; using snapshot", prev_title)
-                            detail = {}
+                            await asyncio.sleep(self.detail_pause)
+                        detail = await self._read_detail_pane(dpage)
                         merged = {**card, **{k: v for k, v in detail.items() if v is not None}}
                         if not merged.get("business_name"):
                             merged["business_name"] = card.get("business_name")
                         merged.pop("_href", None)
                         merged["category"] = merged.get("category") or query
-                        # area/city derivation from address
                         addr = merged.get("full_address") or ""
                         if addr and not merged.get("area_locality"):
                             merged["area_locality"] = location.split(",")[0].strip()
                         if addr and not merged.get("city_pincode"):
                             merged["city_pincode"] = location
-                        if merged.get("business_name"):
-                            records.append(merged)
-                        # back to list
-                        try:
-                            back = page.query_selector("button[aria-label='Back']")
-                            if back:
-                                back.click(timeout=self.click_timeout)
-                                time.sleep(0.3)
-                        except Exception:
-                            pass
+                        return merged if merged.get("business_name") else _snapshot(card)
                     except Exception as exc:
-                        logger.debug("Detail enrich %d failed: %s", i, exc)
-                        # Keep the list-level snapshot instead of dropping the card.
-                        snapshot = {k: v for k, v in card.items() if v is not None}
-                        snapshot.pop("_href", None)
-                        snapshot["category"] = snapshot.get("category") or query
-                        if snapshot.get("business_name"):
-                            records.append(snapshot)
-                        # Try to return to the list so the next card starts clean.
+                        logger.debug("Detail enrich %d failed: %s", idx, exc)
+                        return _snapshot(card)
+                    finally:
                         try:
-                            back = page.query_selector("button[aria-label='Back']")
-                            if back:
-                                back.click(timeout=self.click_timeout)
-                                time.sleep(0.3)
+                            await dpage.close()
                         except Exception:
                             pass
+
+                async def _bounded(card: dict, idx: int) -> dict | None:
+                    async with sema:
+                        if idx:
+                            await asyncio.sleep(min(idx * 0.2, 2.0))
+                        return await _enrich_one(card, idx)
+
+                enriched = await asyncio.gather(*(_bounded(c, i) for i, c in enumerate(cards)))
+                records = [r for r in enriched if r]
 
                 logger.info("Scraped %d enriched records for %r", len(records), search)
                 return records, feed_exhausted
             finally:
                 try:
-                    browser.close()
+                    await browser.close()
                 except Exception:
                     pass
 
     # -- detail pane reader -------------------------------------------------
-    def _read_detail_pane(self, page) -> dict:
-        def _txt(sel: str) -> Optional[str]:
+    async def _read_detail_pane(self, page) -> dict:
+        async def _txt(sel: str) -> Optional[str]:
             try:
-                el = page.query_selector(sel)
-                t = el.inner_text().strip() if el else None
+                el = await page.query_selector(sel)
+                t = (await el.inner_text()).strip() if el else None
                 return t or None
             except Exception:
                 return None
 
-        name = _txt("h1.DUwDvf")
-        category = _txt("button.DkEaL")
-        rating_raw = _txt("div.F7nice span[aria-hidden='true']")
-        reviews_raw = _txt("div.F7nice button, div.F7nice span.HHYRVe")
+        async def _attr(sel: str, attr: str) -> Optional[str]:
+            try:
+                el = await page.query_selector(sel)
+                v = await el.get_attribute(attr) if el else None
+                return v or None
+            except Exception:
+                return None
+
+        name = await _txt("h1.DUwDvf")
+        category = await _txt("button.DkEaL")
+        rating_raw = await _txt("div.F7nice span[aria-hidden='true']")
+        reviews_raw = await _txt("div.F7nice button, div.F7nice span.HHYRVe")
         if reviews_raw is None:
             # Current DOM: reviews live in a button with aria-label "N reviews"
-            try:
-                el = page.query_selector("div.F7nice button[aria-label*='review' i]")
-                reviews_raw = el.get_attribute("aria-label") if el else None
-            except Exception:
-                reviews_raw = None
+            reviews_raw = await _attr("div.F7nice button[aria-label*='review' i]", "aria-label")
         if rating_raw is None or reviews_raw is None:
             # fallback: parse the whole F7nice block, e.g. "4.9(306)"
             try:
-                el = page.query_selector("div.F7nice")
-                block = el.inner_text() if el else ""
+                el = await page.query_selector("div.F7nice")
+                block = await el.inner_text() if el else ""
                 if rating_raw is None:
                     rating_raw = block.split("\n")[0] if block else None
                 if reviews_raw is None and block:
@@ -535,32 +507,31 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
                 pass
         address = phone = website = hours = status = None
         try:
-            el = page.query_selector("button[data-item-id='address'] div.Io6YTe")
-            address = el.inner_text().strip() if el else None
+            el = await page.query_selector("button[data-item-id='address'] div.Io6YTe")
+            address = (await el.inner_text()).strip() if el else None
         except Exception:
             pass
         try:
-            el = page.query_selector("button[data-item-id^='phone'] div.Io6YTe")
-            phone = el.inner_text().strip() if el else None
+            el = await page.query_selector("button[data-item-id^='phone'] div.Io6YTe")
+            phone = (await el.inner_text()).strip() if el else None
         except Exception:
             pass
         try:
-            el = page.query_selector("a[data-item-id='authority']")
-            website = el.get_attribute("href") if el else None
+            website = await _attr("a[data-item-id='authority']", "href")
         except Exception:
             pass
         try:
-            el = page.query_selector("div[data-item-id='oh']")
+            el = await page.query_selector("div[data-item-id='oh']")
             if el:
-                hours = " ".join(el.inner_text().split()) or None
+                hours = " ".join((await el.inner_text()).split()) or None
         except Exception:
             pass
         try:
             # open-now / temporarily closed indicators
             for sel in ("div.MkV9Kd", "span.MkV9Kd", "div.o0Svhf"):
-                el = page.query_selector(sel)
-                if el and el.inner_text().strip():
-                    status = el.inner_text().strip().split("\n")[0]
+                el = await page.query_selector(sel)
+                if el and (await el.inner_text()).strip():
+                    status = (await el.inner_text()).strip().split("\n")[0]
                     break
         except Exception:
             pass
