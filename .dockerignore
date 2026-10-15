@@ -1,0 +1,10 @@
+.venv/
+.git/
+__pycache__/
+.pytest_cache/
+.env
+output/
+*.xlsx
+*.log
+.vscode/
+.idea/
