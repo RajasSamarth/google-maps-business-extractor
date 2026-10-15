@@ -43,7 +43,7 @@ def _env_int(name: str, default: int) -> int:
 _request_timestamps: list[float] = []
 _MAX_PER_MINUTE = 30
 
-_LIST_CACHE: dict[tuple[str, str], tuple[float, list[dict]]] = {}
+_LIST_CACHE: dict[tuple[str, str], tuple[float, list[dict], bool]] = {}
 _LIST_CACHE_TTL = 600.0  # 10 minutes
 
 
@@ -173,28 +173,41 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
     def _get_or_scrape(self, query: str, location: str, needed: int) -> list[dict]:
         key = (query.lower().strip(), location.lower().strip())
         now = time.time()
-        hit = _LIST_CACHE.get(key)
-        if hit and (now - hit[0]) < _LIST_CACHE_TTL and len(hit[1]) >= needed:
-            logger.info("Playwright cache hit %s (%d records)", key, len(hit[1]))
-            return hit[1]
-        # Cache miss: scrape only what this job needs (one browser launch
-        # covers every page via the cache), not a hardcoded 500.
-        full_cap = _env_int("PLAYWRIGHT_FULL_CAP", 200)
+        full_cap = _env_int("PLAYWRIGHT_FULL_CAP", 500)
         if self.target_cap:
             target = max(needed, self.target_cap)
         else:
             target = max(needed, min(full_cap, max(needed, 20)))
             target = min(target, 500)
-        records = self._scrape(query, location, target)
-        _LIST_CACHE[key] = (now, records)
+        hit = _LIST_CACHE.get(key)
+        # A cached list is reusable only if it is fresh AND complete enough:
+        # either its feed was fully exhausted, or it already holds everything
+        # this job could want. Otherwise an old capped scrape would poison a
+        # later uncapped ("give me all") search with stale partial data.
+        if hit and (now - hit[0]) < _LIST_CACHE_TTL:
+            _, cached_records, feed_exhausted = hit
+            if feed_exhausted or len(cached_records) >= max(needed, target):
+                logger.info("Playwright cache hit %s (%d records)", key, len(cached_records))
+                return cached_records
+            logger.info(
+                "Playwright cache miss %s (cached %d < needed %d, rescraping)",
+                key, len(cached_records), max(needed, target),
+            )
+        # Cache miss: scrape only what this job needs (one browser launch
+        # covers every page via the cache), not a hardcoded 500.
+        records, feed_exhausted = self._scrape(query, location, target)
+        _LIST_CACHE[key] = (now, records, feed_exhausted)
         return records
 
     # -- core scrape --------------------------------------------------------
-    def _scrape(self, query: str, location: str, target: int) -> list[dict]:
+    def _scrape(self, query: str, location: str, target: int) -> tuple[list[dict], bool]:
         search = f"{query} {location}".strip()
         url = f"https://www.google.com/maps/search/{quote_plus(search)}"
         logger.info("Playwright scraping %r (target %d)", search, target)
         records: list[dict] = []
+        # True when the feed gave us everything it had (stopped growing on
+        # its own) as opposed to stopping because we hit `target`.
+        feed_exhausted = True
 
         with sync_playwright() as pw:
             browser = pw.chromium.launch(
@@ -242,18 +255,18 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
                     )
                 except PlaywrightError:
                     logger.warning("No results container found for %r", search)
-                    return []
+                    return [], True
 
                 # Single-place result (no feed): enrich directly.
                 if not page.query_selector("div[role='feed']") and page.query_selector("h1.DUwDvf"):
                     rec = self._read_detail_pane(page)
                     rec["category"] = rec.get("category") or query
-                    return [rec]
+                    return [rec], True
 
                 feed = page.query_selector("div[role='feed']")
                 if feed is None:
                     logger.warning("Feed missing for %r", search)
-                    return []
+                    return [], True
 
                 # Scroll the feed until it stops growing (full result set)
                 # or we hit the safety cap. Cap scales with target so a
@@ -264,6 +277,7 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
                 scroll_cap = min(120, max(12, (target // 3) + 8))
                 for _ in range(scroll_cap):  # dynamic cap on scroll iterations
                     if len(links) >= target:
+                        feed_exhausted = False  # stopped by target, feed may hold more
                         break
                     prev = len(links)
                     try:
@@ -376,7 +390,7 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
                             pass
 
                 logger.info("Scraped %d enriched records for %r", len(records), search)
-                return records
+                return records, feed_exhausted
             finally:
                 try:
                     browser.close()
