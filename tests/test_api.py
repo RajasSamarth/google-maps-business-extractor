@@ -98,3 +98,33 @@ def test_unauthorized_results():
     bad = TestClient(app)  # no API key
     resp = bad.get("/api/v1/search/anything/results")
     assert resp.status_code == 401
+
+
+def test_multi_area_search_merges_areas():
+    resp = client.post("/api/v1/search", json={
+        "query": "restaurants",
+        "location": "Area One",
+        "extra_locations": ["Area Two"],
+        "max_results": 100,
+    })
+    assert resp.status_code == 200
+    job_id = resp.json()["job_id"]
+
+    for _ in range(50):
+        status_data = client.get(f"/api/v1/search/{job_id}").json()
+        if status_data["status"] in ("done", "failed"):
+            break
+        time.sleep(0.1)
+
+    # Synthetic source holds 87 per area, but its fake place_ids repeat
+    # across areas (odd n share place_{n}, plus one place_dup), so 8 of
+    # Area Two's 13 overlap and dedupe out: 87 + 13 - 8 = 92.
+    # Live place_ids are globally unique, so no such overlap occurs.
+    assert status_data["status"] == "done"
+    assert status_data["total_results"] == 92
+
+    payload = client.get(f"/api/v1/search/{job_id}/results").json()
+    assert len(payload["records"]) == 92
+    addresses = " | ".join(r.get("full_address") or "" for r in payload["records"])
+    assert "Area One" in addresses
+    assert "Area Two" in addresses

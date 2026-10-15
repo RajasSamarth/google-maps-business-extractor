@@ -35,12 +35,12 @@
   }
   .card h2 { font-size: 1.05rem; margin-bottom: 14px; }
   label { display: block; font-size: 0.8rem; color: var(--muted); margin: 12px 0 5px; }
-  input, select {
+  input, select, textarea {
     width: 100%; padding: 10px 12px; border-radius: 8px;
     border: 1px solid var(--border); background: #101728; color: var(--text);
     font-size: 0.92rem; outline: none;
   }
-  input:focus, select:focus { border-color: var(--accent); }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); }
   .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .hint { font-size: 0.75rem; color: var(--muted); margin-top: 4px; }
   button.primary {
@@ -136,6 +136,9 @@
       <input id="maxResults" type="number" min="1" max="10000" placeholder="Blank = all results" />
       <div class="hint">Leave blank to collect every listing Google Maps returns.</div>
       <label><input id="enrich" type="checkbox" checked style="width:auto;margin-right:8px" />Full details — phone, website, hours (uncheck = fast list-only, ~50x quicker)</label>
+      <label for="extraLocations">Extra areas (one per line) — for full-city coverage</label>
+      <textarea id="extraLocations" rows="3" placeholder="Sadar, Nagpur&#10;Bajaj Nagar, Nagpur&#10;Dharampeth, Nagpur"></textarea>
+      <div class="hint">One job sweeps Location + each area below, then merges. A single Google feed ends at ~120 listings — this is how you get everything.</div>
 
       <button class="primary" id="searchBtn">Search</button>
       <div class="status" id="status"></div>
@@ -169,7 +172,7 @@
 const $ = (id) => document.getElementById(id);
 const apiKeyEl = $("apiKey"), queryEl = $("query"), locEl = $("location"),
       radiusEl = $("radius"), ratingEl = $("minRating"), maxEl = $("maxResults"),
-      enrichEl = $("enrich"), searchBtn = $("searchBtn"), statusEl = $("status"), errorEl = $("error"),
+      enrichEl = $("enrich"), extraLocEl = $("extraLocations"), searchBtn = $("searchBtn"), statusEl = $("status"), errorEl = $("error"),
       countEl = $("count"), filterEl = $("filter"), dlBtn = $("downloadBtn"),
       tableEl = $("table"), tbodyEl = $("tbody"), emptyEl = $("empty");
 
@@ -202,6 +205,8 @@ searchBtn.addEventListener("click", async () => {
   const mr = parseInt(maxEl.value, 10); if (!isNaN(mr) && mr > 0) body.max_results = mr;
   const minR = parseFloat(ratingEl.value); if (!isNaN(minR)) body.min_rating = minR;
   body.enrich_details = enrichEl.checked;
+  const extras = extraLocEl.value.split("\n").map((s) => s.trim()).filter(Boolean);
+  if (extras.length) body.extra_locations = extras;
 
   let res;
   try {

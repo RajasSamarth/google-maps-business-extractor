@@ -163,14 +163,35 @@ def run_job(job_id: str) -> None:
         max_results = params.get("max_results")
         min_rating = params.get("min_rating")
 
-        records, error, meta = collect(
-            source=source,
-            query=params["query"],
-            location=params["location"],
-            radius_km=radius,
-            max_results=max_results,
-            page_size=20,
-        )
+        # Fan-out: the main location plus any extra areas, each scraped as
+        # its own feed (Google caps a single feed at ~120 listings), then
+        # merged and deduped into one result set.
+        locations = [params["location"]]
+        for extra in params.get("extra_locations") or []:
+            extra = (extra or "").strip()
+            if extra and extra not in locations:
+                locations.append(extra)
+
+        all_raw: list = []
+        error = None
+        for loc in locations:
+            remaining = None if max_results is None else max_results - len(all_raw)
+            if remaining is not None and remaining <= 0:
+                break
+            page_records, page_error, _meta = collect(
+                source=source,
+                query=params["query"],
+                location=loc,
+                radius_km=radius,
+                max_results=remaining,
+                page_size=20,
+            )
+            all_raw.extend(page_records or [])
+            if page_error is not None:
+                error = page_error
+            logger.info("Job %s area %r: %d records (total %d)", job_id, loc, len(page_records or []), len(all_raw))
+
+        records = all_raw
 
         cleaned = clean_records(records, min_rating=min_rating)
 
@@ -178,7 +199,7 @@ def run_job(job_id: str) -> None:
 
         info = SearchInfo(
             query=params["query"],
-            location=params["location"],
+            location=", ".join(locations),
             radius_km=radius,
             timestamp=datetime.utcnow().isoformat(timespec="seconds"),
             total_results=len(cleaned),
