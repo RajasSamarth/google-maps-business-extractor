@@ -71,7 +71,7 @@ _EXECUTOR = ThreadPoolExecutor(max_workers=_JOB_WORKERS, thread_name_prefix="sea
 # -----------------------------------------------------------------
 # Factory: return the concrete DataSource the job will use.
 # -----------------------------------------------------------------
-def _data_source(max_results: int | None = None):
+def _data_source(max_results: int | None = None, enrich: bool = True):
     """Pick a source based on environment variables.
 
     * ``USE_PLAYWRIGHT_SOURCE`` = "1"  → PlaywrightGoogleMapsSource (requires
@@ -84,7 +84,7 @@ def _data_source(max_results: int | None = None):
         from app.adapters.playwright_source import PlaywrightGoogleMapsSource
         # headless=True keeps the browser invisible; set False for debugging.
         # target_cap ensures a max_results=5 job scrapes ~5 listings, not 500.
-        return PlaywrightGoogleMapsSource(headless=True, target_cap=max_results)
+        return PlaywrightGoogleMapsSource(headless=True, target_cap=max_results, enrich=enrich)
     return SyntheticDataSource(total_available=87, page_size=20)
 
 
@@ -156,7 +156,8 @@ def run_job(job_id: str) -> None:
     try:
         # For now we use the synthetic approved source. Swap this for the real
         # adapter once the data source has been authorized.
-        source = _data_source(max_results=params.get("max_results"))
+        source = _data_source(max_results=params.get("max_results"),
+                              enrich=params.get("enrich_details", True))
 
         radius = params.get("radius_km")
         max_results = params.get("max_results")

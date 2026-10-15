@@ -54,6 +54,7 @@ class SearchRequest(BaseModel):
     radius_km: float | None = Field(default=None, ge=0.1, le=100, description="Optional reference saved with the search; the search area itself comes from the location text.")
     max_results: int | None = Field(default=None, ge=1, le=10000, description="Maximum number of results.")
     min_rating: float | None = Field(default=None, ge=0, le=5, description="Minimum rating filter.")
+    enrich_details: bool = Field(default=True, description="True (default): open each listing for phone/website/hours. False: fast list-level data only.")
 
 
 class SearchCreatedResponse(BaseModel):

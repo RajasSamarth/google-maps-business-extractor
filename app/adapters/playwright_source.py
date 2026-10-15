@@ -43,7 +43,7 @@ def _env_int(name: str, default: int) -> int:
 _request_timestamps: list[float] = []
 _MAX_PER_MINUTE = 30
 
-_LIST_CACHE: dict[tuple[str, str], tuple[float, list[dict], bool]] = {}
+_LIST_CACHE: dict[tuple, tuple[float, list[dict], bool]] = {}
 _LIST_CACHE_TTL = 600.0  # 10 minutes
 
 
@@ -55,6 +55,27 @@ def _respect_rate_limit() -> None:
         wait = 60.0 - (now - min(_request_timestamps)) + 1.0
         time.sleep(max(0.0, wait) * (1 + random.uniform(-0.1, 0.1)))
     _request_timestamps.append(time.time())
+
+
+def _parse_card_rating(text: Optional[str]) -> tuple[Optional[float], Optional[int]]:
+    """Best-effort rating + review count from a result card's text.
+
+    Only trusts a review count when it appears paired with a rating
+    (e.g. "4.5 (1,234)"), otherwise a stray number (plot no., floor)
+    would become a fake review count.
+    """
+    if not text:
+        return None, None
+    clean = text.replace("\u00a0", " ")
+    m = re.search(r"(\d[.,]\d)\s*\(([\d,]+)\)", clean)
+    if m:
+        try:
+            return float(m.group(1).replace(",", ".")), int(m.group(2).replace(",", ""))
+        except ValueError:
+            pass
+    # No paired "4.5 (1,234)" pattern: report nothing rather than risk a
+    # stray number (plot no., floor) becoming a fake rating.
+    return None, None
 
 
 def _parse_reviews(text: Optional[str]) -> Optional[int]:
@@ -114,6 +135,7 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
         target_cap: int | None = None,
         scroll_delay: float | None = None,
         detail_pause: float | None = None,
+        enrich: bool = True,
     ) -> None:
         self.headless = headless
         self.pause_sec = pause_sec if pause_sec is not None else _env_float("PLAYWRIGHT_PAUSE_SEC", 0.6)
@@ -133,6 +155,9 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
         # click used to drop the whole card (see enrich loop below).
         self.click_timeout = _env_int("PLAYWRIGHT_CLICK_TIMEOUT", 8000)
         self.detail_timeout = _env_int("PLAYWRIGHT_DETAIL_TIMEOUT", 8000)
+        # Fast mode skips per-listing detail pages (phone/website/hours) and
+        # returns list-level data only: ~50x faster for full-feed runs.
+        self.enrich = enrich
 
     def _pause(self, mult: float = 1.0) -> None:
         time.sleep(self.pause_sec * mult)
@@ -165,13 +190,15 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
                 last_exc = exc
                 attempt += 1
                 logger.warning("Playwright attempt %d/3 failed: %s", attempt, exc)
-                _LIST_CACHE.pop((query.lower().strip(), location.lower().strip()), None)
+                _LIST_CACHE.pop((query.lower().strip(), location.lower().strip(), self.enrich), None)
                 time.sleep(2 ** (attempt - 1))
         raise last_exc  # type: ignore[misc]
 
     # -- cache wrapper ------------------------------------------------------
     def _get_or_scrape(self, query: str, location: str, needed: int) -> list[dict]:
-        key = (query.lower().strip(), location.lower().strip())
+        # Fast (list-only) and full (enriched) scrapes are cached separately:
+        # their records have different shapes and must never mix.
+        key = (query.lower().strip(), location.lower().strip(), self.enrich)
         now = time.time()
         full_cap = _env_int("PLAYWRIGHT_FULL_CAP", 500)
         if self.target_cap:
@@ -329,11 +356,38 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
                             el = a.query_selector("div.fontHeadlineSmall")
                             name = el.inner_text().strip() if el else None
                         lat, lng = _parse_latlng(href or "")
+                        rating, reviews = None, None
+                        try:
+                            card_text = a.evaluate(
+                                """(el) => {
+                                    let n = el;
+                                    for (let i = 0; i < 6 && n; i++) n = n.parentElement;
+                                    return n ? n.innerText : '';
+                                }"""
+                            ) or ""
+                            rating, reviews = _parse_card_rating(card_text)
+                        except Exception:
+                            pass
                         cards.append({"_href": href, "business_name": name,
                                       "google_maps_link": href,
-                                      "latitude": lat, "longitude": lng})
+                                      "latitude": lat, "longitude": lng,
+                                      "rating": rating, "total_reviews": reviews})
                     except Exception:
                         continue
+
+                if not self.enrich:
+                    # Fast mode: return list-level data without opening any
+                    # detail pane. No phone/website/hours, but ~50x faster.
+                    for card in cards:
+                        card.pop("_href", None)
+                        card["category"] = card.get("category") or query
+                        card["area_locality"] = location.split(",")[0].strip()
+                        card["city_pincode"] = location
+                        card["business_status"] = "Operational"
+                        if card.get("business_name"):
+                            records.append(card)
+                    logger.info("Scraped %d list-level records for %r (fast mode)", len(records), search)
+                    return records, feed_exhausted
 
                 # Enrich each card by opening its detail pane.
                 prev_title: str | None = None

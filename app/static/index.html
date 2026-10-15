@@ -135,6 +135,7 @@
       <label for="maxResults">Max results</label>
       <input id="maxResults" type="number" min="1" max="10000" placeholder="Blank = all results" />
       <div class="hint">Leave blank to collect every listing Google Maps returns.</div>
+      <label><input id="enrich" type="checkbox" checked style="width:auto;margin-right:8px" />Full details — phone, website, hours (uncheck = fast list-only, ~50x quicker)</label>
 
       <button class="primary" id="searchBtn">Search</button>
       <div class="status" id="status"></div>
@@ -168,7 +169,7 @@
 const $ = (id) => document.getElementById(id);
 const apiKeyEl = $("apiKey"), queryEl = $("query"), locEl = $("location"),
       radiusEl = $("radius"), ratingEl = $("minRating"), maxEl = $("maxResults"),
-      searchBtn = $("searchBtn"), statusEl = $("status"), errorEl = $("error"),
+      enrichEl = $("enrich"), searchBtn = $("searchBtn"), statusEl = $("status"), errorEl = $("error"),
       countEl = $("count"), filterEl = $("filter"), dlBtn = $("downloadBtn"),
       tableEl = $("table"), tbodyEl = $("tbody"), emptyEl = $("empty");
 
@@ -200,6 +201,7 @@ searchBtn.addEventListener("click", async () => {
   const r = parseFloat(radiusEl.value); body.radius_km = isNaN(r) ? null : r;
   const mr = parseInt(maxEl.value, 10); if (!isNaN(mr) && mr > 0) body.max_results = mr;
   const minR = parseFloat(ratingEl.value); if (!isNaN(minR)) body.min_rating = minR;
+  body.enrich_details = enrichEl.checked;
 
   let res;
   try {
