@@ -1,7 +1,7 @@
 # Render free-tier blueprint. See https://render.com/docs/blueprint-spec
 services:
   - type: web
-    name: dharampeth-business-extractor
+    name: google-maps-business-extractor
     runtime: python
     buildCommand: "pip install -r requirements.txt"
     startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"

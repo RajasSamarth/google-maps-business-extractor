@@ -27,7 +27,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Dharampeth Business Data Extractor",
+    title="Google Maps Business Extractor",
     version="0.2.0",
     description="Extract business listings and export them to Excel.",
     lifespan=lifespan,
@@ -47,7 +47,7 @@ def index():
     if index_file.exists():
         return FileResponse(path=str(index_file), media_type="text/html")
     return JSONResponse(
-        content={"message": "Dharampeth Business Data Extractor API. See /docs."}
+        content={"message": "Google Maps Business Extractor API. See /docs."}
     )
 
 

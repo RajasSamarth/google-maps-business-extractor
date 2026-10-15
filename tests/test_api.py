@@ -66,7 +66,7 @@ def test_index_is_public():
     anon = TestClient(app)  # no API key
     resp = anon.get("/")
     assert resp.status_code == 200
-    assert "Dharampeth Business Data Extractor" in resp.text
+    assert "Google Maps Business Extractor" in resp.text
 
 
 def test_results_endpoint_returns_all_records():

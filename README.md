@@ -1,4 +1,4 @@
-# Dharampeth Business Data Extractor
+# Google Maps Business Extractor
 
 A FastAPI service that searches live Google Maps business listings via
 Playwright browser automation and exports the results to an Excel file.
@@ -13,7 +13,7 @@ starting the server.
 ## Setup (PowerShell)
 
 ```powershell
-cd "D:\Velocity Projects\Google Scraper\dharampeth-business-extractor"
+cd "D:\Velocity Projects\Google Scraper\google-maps-business-extractor"
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install -r requirements.txt
