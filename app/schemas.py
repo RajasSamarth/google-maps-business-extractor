@@ -57,6 +57,8 @@ class SearchRequest(BaseModel):
     enrich_details: bool = Field(default=True, description="True (default): open each listing for phone/website/hours. False: fast list-level data only.")
     extra_locations: list[str] = Field(default=[], description="Extra areas swept by the same job (one search per area, merged and deduped). Use for full-city coverage: Google caps a single feed at ~120 listings.")
     extra_queries: list[str] = Field(default=[], description="Extra query variants swept per area (e.g. family restaurant, dhaba). Combined with extra_locations for maximum coverage.")
+    auto_areas: bool = Field(default=False, description="True: auto-discover the city's areas via OpenStreetMap and sweep them all in this job.")
+    max_areas: int | None = Field(default=30, ge=1, le=200, description="Cap on auto-discovered areas per job.")
 
 
 class SearchCreatedResponse(BaseModel):

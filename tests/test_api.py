@@ -155,3 +155,41 @@ def test_multi_query_search_merges_queries():
     assert len(payload["records"]) == 88
     categories = set(r.get("category") for r in payload["records"])
     assert categories == {"restaurants", "cafes"}
+
+
+def test_auto_areas_sweeps_discovered_areas(monkeypatch):
+    import app.jobs as jobs_mod
+
+    monkeypatch.setattr(
+        "app.services.areas.discover_areas", lambda city, limit=30: ["Area Two", "Area Three"]
+    )
+    # run_job imports discover inside the function; patch the source module attr.
+    import app.services.areas as areas_mod
+
+    orig = areas_mod.discover_areas
+    monkeypatch.setattr(areas_mod, "discover_areas", lambda city, limit=30: ["Area Two", "Area Three"])
+    try:
+        resp = client.post("/api/v1/search", json={
+            "query": "restaurants",
+            "location": "Area One",
+            "auto_areas": True,
+            "max_results": 200,
+        })
+        assert resp.status_code == 200
+        job_id = resp.json()["job_id"]
+
+        for _ in range(60):
+            status_data = client.get(f"/api/v1/search/{job_id}").json()
+            if status_data["status"] in ("done", "failed"):
+                break
+            time.sleep(0.1)
+
+        assert status_data["status"] == "done"
+        # 3 synthetic areas x 87, minus cross-area place_id overlaps.
+        assert status_data["total_results"] > 87
+        payload = client.get(f"/api/v1/search/{job_id}/results").json()
+        addresses = " | ".join(r.get("full_address") or "" for r in payload["records"])
+        assert "Area One" in addresses
+        assert "Area Two" in addresses
+    finally:
+        monkeypatch.setattr(areas_mod, "discover_areas", orig)

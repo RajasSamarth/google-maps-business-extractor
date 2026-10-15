@@ -142,6 +142,7 @@
       <label for="extraQueries">Extra queries (one per line) — variants per area</label>
       <textarea id="extraQueries" rows="3" placeholder="family restaurant&#10;veg restaurant&#10;dhaba"></textarea>
       <div class="hint">Combined with areas above: queries × areas feeds, merged and deduped.</div>
+      <label><input id="autoAreas" type="checkbox" style="width:auto;margin-right:8px" />Auto-split city into areas (finds localities via OpenStreetMap — no typing needed)</label>
 
       <button class="primary" id="searchBtn">Search</button>
       <div class="status" id="status"></div>
@@ -175,7 +176,7 @@
 const $ = (id) => document.getElementById(id);
 const apiKeyEl = $("apiKey"), queryEl = $("query"), locEl = $("location"),
       radiusEl = $("radius"), ratingEl = $("minRating"), maxEl = $("maxResults"),
-      enrichEl = $("enrich"), extraLocEl = $("extraLocations"), extraQEl = $("extraQueries"), searchBtn = $("searchBtn"), statusEl = $("status"), errorEl = $("error"),
+      enrichEl = $("enrich"), extraLocEl = $("extraLocations"), extraQEl = $("extraQueries"), autoAreasEl = $("autoAreas"), searchBtn = $("searchBtn"), statusEl = $("status"), errorEl = $("error"),
       countEl = $("count"), filterEl = $("filter"), dlBtn = $("downloadBtn"),
       tableEl = $("table"), tbodyEl = $("tbody"), emptyEl = $("empty");
 
@@ -212,6 +213,7 @@ searchBtn.addEventListener("click", async () => {
   if (extras.length) body.extra_locations = extras;
   const exq = extraQEl.value.split("\n").map((s) => s.trim()).filter(Boolean);
   if (exq.length) body.extra_queries = exq;
+  if (autoAreasEl.checked) body.auto_areas = true;
 
   let res;
   try {

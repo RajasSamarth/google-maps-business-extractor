@@ -177,6 +177,22 @@ def run_job(job_id: str) -> None:
             if extra and extra not in locations:
                 locations.append(extra)
 
+        # Automatic area-wise sweep: discover the city's localities and add
+        # them, so "restaurants in Nagpur" fans out without a hand-typed list.
+        discovery_note = None
+        if params.get("auto_areas"):
+            from app.services.areas import discover_areas, extract_city
+
+            city = extract_city(params["location"])
+            found = discover_areas(city, limit=params.get("max_areas") or 30)
+            for area in found:
+                label = area if not city or city.lower() in area.lower() else f"{area}, {city}"
+                if label not in locations:
+                    locations.append(label)
+            logger.info("Job %s auto-areas for %r: %d locations total", job_id, city, len(locations))
+            if not found:
+                discovery_note = f"Area auto-discovery for {city!r} failed; searched main location only."
+
         all_raw: list = []
         error = None
         for q in queries:
@@ -228,8 +244,12 @@ def run_job(job_id: str) -> None:
             job.error = str(error)
         else:
             job.status = "done"
+            notes = []
             if error is not None:
-                job.error = f"Partial failure: {error}"
+                notes.append(f"Partial failure: {error}")
+            if discovery_note:
+                notes.append(discovery_note)
+            job.error = "; ".join(notes) if notes else None
     except Exception as exc:  # noqa: BLE001
         job.status = "failed"
         job.error = str(exc)
