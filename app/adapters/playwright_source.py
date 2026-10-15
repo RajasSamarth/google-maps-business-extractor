@@ -260,6 +260,7 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
                 # max_results=5 job does ~12 scrolls, not 120.
                 links = page.query_selector_all("a.hfpxzc")
                 stable = 0
+                stable_needed = _env_int("PLAYWRIGHT_SCROLL_STABLE", 6)
                 scroll_cap = min(120, max(12, (target // 3) + 8))
                 for _ in range(scroll_cap):  # dynamic cap on scroll iterations
                     if len(links) >= target:
@@ -276,7 +277,27 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
                     links = page.query_selector_all("a.hfpxzc")
                     if len(links) <= prev:
                         stable += 1
-                        if stable >= 3:
+                        if stable == 3:
+                            # Nudge up then down to retrigger lazy loading;
+                            # broad feeds often stall before their true end.
+                            try:
+                                page.evaluate(
+                                    "(el) => el.scrollTo(0, Math.max(0, el.scrollHeight - 1200))",
+                                    feed,
+                                )
+                                time.sleep(self.scroll_delay)
+                                page.evaluate(
+                                    "(el) => el.scrollTo(0, el.scrollHeight)",
+                                    feed,
+                                )
+                                time.sleep(self.scroll_delay)
+                                links = page.query_selector_all("a.hfpxzc")
+                                if len(links) > prev:
+                                    stable = 0
+                                    continue
+                            except Exception:
+                                pass
+                        if stable >= stable_needed:
                             break
                     else:
                         stable = 0
