@@ -177,8 +177,10 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
         if self.target_cap:
             target = max(needed, self.target_cap)
         else:
-            target = max(needed, min(full_cap, max(needed, 20)))
-            target = min(target, 500)
+            # Uncapped ("give me all") job: scrape to the full cap.
+            # `needed` is only the current page size (20) and must NOT size
+            # the whole scrape, or every uncapped search stops at 20.
+            target = min(full_cap, 500)
         hit = _LIST_CACHE.get(key)
         # A cached list is reusable only if it is fresh AND complete enough:
         # either its feed was fully exhausted, or it already holds everything
