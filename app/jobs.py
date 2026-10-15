@@ -163,9 +163,14 @@ def run_job(job_id: str) -> None:
         max_results = params.get("max_results")
         min_rating = params.get("min_rating")
 
-        # Fan-out: the main location plus any extra areas, each scraped as
-        # its own feed (Google caps a single feed at ~120 listings), then
-        # merged and deduped into one result set.
+        # Fan-out: every query variant x every area, each scraped as its own
+        # feed (Google caps a single feed at ~120 listings), then merged
+        # and deduped into one result set.
+        queries = [params["query"]]
+        for extra in params.get("extra_queries") or []:
+            extra = (extra or "").strip()
+            if extra and extra not in queries:
+                queries.append(extra)
         locations = [params["location"]]
         for extra in params.get("extra_locations") or []:
             extra = (extra or "").strip()
@@ -174,22 +179,25 @@ def run_job(job_id: str) -> None:
 
         all_raw: list = []
         error = None
-        for loc in locations:
-            remaining = None if max_results is None else max_results - len(all_raw)
+        for q in queries:
+            for loc in locations:
+                remaining = None if max_results is None else max_results - len(all_raw)
+                if remaining is not None and remaining <= 0:
+                    break
+                page_records, page_error, _meta = collect(
+                    source=source,
+                    query=q,
+                    location=loc,
+                    radius_km=radius,
+                    max_results=remaining,
+                    page_size=20,
+                )
+                all_raw.extend(page_records or [])
+                if page_error is not None:
+                    error = page_error
+                logger.info("Job %s %r @ %r: %d records (total %d)", job_id, q, loc, len(page_records or []), len(all_raw))
             if remaining is not None and remaining <= 0:
                 break
-            page_records, page_error, _meta = collect(
-                source=source,
-                query=params["query"],
-                location=loc,
-                radius_km=radius,
-                max_results=remaining,
-                page_size=20,
-            )
-            all_raw.extend(page_records or [])
-            if page_error is not None:
-                error = page_error
-            logger.info("Job %s area %r: %d records (total %d)", job_id, loc, len(page_records or []), len(all_raw))
 
         records = all_raw
 
@@ -198,7 +206,7 @@ def run_job(job_id: str) -> None:
         from app.schemas import SearchInfo
 
         info = SearchInfo(
-            query=params["query"],
+            query=", ".join(queries),
             location=", ".join(locations),
             radius_km=radius,
             timestamp=datetime.utcnow().isoformat(timespec="seconds"),

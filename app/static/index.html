@@ -139,6 +139,9 @@
       <label for="extraLocations">Extra areas (one per line) — for full-city coverage</label>
       <textarea id="extraLocations" rows="3" placeholder="Sadar, Nagpur&#10;Bajaj Nagar, Nagpur&#10;Dharampeth, Nagpur"></textarea>
       <div class="hint">One job sweeps Location + each area below, then merges. A single Google feed ends at ~120 listings — this is how you get everything.</div>
+      <label for="extraQueries">Extra queries (one per line) — variants per area</label>
+      <textarea id="extraQueries" rows="3" placeholder="family restaurant&#10;veg restaurant&#10;dhaba"></textarea>
+      <div class="hint">Combined with areas above: queries × areas feeds, merged and deduped.</div>
 
       <button class="primary" id="searchBtn">Search</button>
       <div class="status" id="status"></div>
@@ -172,7 +175,7 @@
 const $ = (id) => document.getElementById(id);
 const apiKeyEl = $("apiKey"), queryEl = $("query"), locEl = $("location"),
       radiusEl = $("radius"), ratingEl = $("minRating"), maxEl = $("maxResults"),
-      enrichEl = $("enrich"), extraLocEl = $("extraLocations"), searchBtn = $("searchBtn"), statusEl = $("status"), errorEl = $("error"),
+      enrichEl = $("enrich"), extraLocEl = $("extraLocations"), extraQEl = $("extraQueries"), searchBtn = $("searchBtn"), statusEl = $("status"), errorEl = $("error"),
       countEl = $("count"), filterEl = $("filter"), dlBtn = $("downloadBtn"),
       tableEl = $("table"), tbodyEl = $("tbody"), emptyEl = $("empty");
 
@@ -207,6 +210,8 @@ searchBtn.addEventListener("click", async () => {
   body.enrich_details = enrichEl.checked;
   const extras = extraLocEl.value.split("\n").map((s) => s.trim()).filter(Boolean);
   if (extras.length) body.extra_locations = extras;
+  const exq = extraQEl.value.split("\n").map((s) => s.trim()).filter(Boolean);
+  if (exq.length) body.extra_queries = exq;
 
   let res;
   try {

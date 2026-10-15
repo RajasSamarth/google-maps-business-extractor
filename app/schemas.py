@@ -56,6 +56,7 @@ class SearchRequest(BaseModel):
     min_rating: float | None = Field(default=None, ge=0, le=5, description="Minimum rating filter.")
     enrich_details: bool = Field(default=True, description="True (default): open each listing for phone/website/hours. False: fast list-level data only.")
     extra_locations: list[str] = Field(default=[], max_length=20, description="Extra areas swept by the same job (one search per area, merged and deduped). Use for full-city coverage: Google caps a single feed at ~120 listings.")
+    extra_queries: list[str] = Field(default=[], max_length=20, description="Extra query variants swept per area (e.g. family restaurant, dhaba). Combined with extra_locations for maximum coverage.")
 
 
 class SearchCreatedResponse(BaseModel):

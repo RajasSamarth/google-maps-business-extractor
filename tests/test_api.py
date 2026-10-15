@@ -128,3 +128,30 @@ def test_multi_area_search_merges_areas():
     addresses = " | ".join(r.get("full_address") or "" for r in payload["records"])
     assert "Area One" in addresses
     assert "Area Two" in addresses
+
+
+def test_multi_query_search_merges_queries():
+    resp = client.post("/api/v1/search", json={
+        "query": "restaurants",
+        "location": "Area One",
+        "extra_queries": ["cafes"],
+        "max_results": 90,
+    })
+    assert resp.status_code == 200
+    job_id = resp.json()["job_id"]
+
+    for _ in range(50):
+        status_data = client.get(f"/api/v1/search/{job_id}").json()
+        if status_data["status"] in ("done", "failed"):
+            break
+        time.sleep(0.1)
+
+    # 87 from the main query + 3 from the variant, minus 2 shared fake
+    # place_ids (place_1, place_3) that dedupe out = 88.
+    assert status_data["status"] == "done"
+    assert status_data["total_results"] == 88
+
+    payload = client.get(f"/api/v1/search/{job_id}/results").json()
+    assert len(payload["records"]) == 88
+    categories = set(r.get("category") for r in payload["records"])
+    assert categories == {"restaurants", "cafes"}
