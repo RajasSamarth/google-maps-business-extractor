@@ -1,9 +1,13 @@
-FROM mcr.microsoft.com/playwright/python:v1.64.0-jammy
+FROM python:3.12-slim
+
+ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+    && playwright install --with-deps chromium \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY app ./app
 
