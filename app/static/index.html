@@ -116,8 +116,9 @@
 
       <div class="row">
         <div>
-          <label for="radius">Radius (km)</label>
-          <input id="radius" type="number" value="3" min="0.1" max="100" step="0.1" />
+          <label for="radius">Radius (km) — optional</label>
+          <input id="radius" type="number" min="0.1" max="100" step="0.1" placeholder="Blank = whole area" />
+          <div class="hint">Reference only, saved in Excel. The search area comes from Location text.</div>
         </div>
         <div>
           <label for="minRating">Min rating</label>
@@ -196,7 +197,7 @@ searchBtn.addEventListener("click", async () => {
   countEl.textContent = "Starting search...";
 
   const body = { query: queryEl.value.trim(), location: locEl.value.trim() };
-  const r = parseFloat(radiusEl.value); if (!isNaN(r)) body.radius_km = r;
+  const r = parseFloat(radiusEl.value); body.radius_km = isNaN(r) ? null : r;
   const mr = parseInt(maxEl.value, 10); if (!isNaN(mr) && mr > 0) body.max_results = mr;
   const minR = parseFloat(ratingEl.value); if (!isNaN(minR)) body.min_rating = minR;
 

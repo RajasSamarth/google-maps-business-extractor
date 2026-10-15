@@ -51,7 +51,7 @@ from pydantic import BaseModel, Field
 class SearchRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=200, description="Business category to search for.")
     location: str = Field(..., min_length=1, max_length=200, description="Area, city, or landmark.")
-    radius_km: float | None = Field(default=5.0, ge=0.1, le=100, description="Search radius in kilometres.")
+    radius_km: float | None = Field(default=None, ge=0.1, le=100, description="Optional reference saved with the search; the search area itself comes from the location text.")
     max_results: int | None = Field(default=None, ge=1, le=10000, description="Maximum number of results.")
     min_rating: float | None = Field(default=None, ge=0, le=5, description="Minimum rating filter.")
 
