@@ -195,7 +195,8 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
         with sync_playwright() as pw:
             browser = pw.chromium.launch(
                 headless=self.headless,
-                args=["--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage"],
+                args=["--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage",
+                      "--no-sandbox", "--disable-gpu"],
             )
             try:
                 context = browser.new_context(
