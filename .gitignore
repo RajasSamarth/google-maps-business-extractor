@@ -1,0 +1,25 @@
+# Python virtual environment
+.venv/
+
+# Environment secrets
+.env
+
+# Generated output files
+output/*
+!output/.gitkeep
+*.xlsx
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Logs
+*.log

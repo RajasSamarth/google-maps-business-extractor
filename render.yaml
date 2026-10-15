@@ -1,0 +1,17 @@
+# Render free-tier blueprint. See https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: dharampeth-business-extractor
+    runtime: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    plan: free
+    envVars:
+      - key: API_KEY
+        sync: false
+      - key: OUTPUT_DIR
+        value: output
+      - key: USE_PLAYWRIGHT_SOURCE
+        value: "0"
+      - key: PYTHON_VERSION
+        value: 3.12.6

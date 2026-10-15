@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Dharampeth Business Data Extractor</title>
+<style>
+  :root {
+    --bg: #0f1420; --card: #1a2233; --border: #2a3650;
+    --text: #e8edf5; --muted: #93a0b8;
+    --accent: #4f8cff; --accent-hover: #3b76e0;
+    --success: #34c98e; --error: #f06464; --warn: #f0b429;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: var(--bg); color: var(--text);
+    min-height: 100vh; padding: 24px 16px 60px;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: 14px; margin-bottom: 24px; flex-wrap: wrap; }
+  .logo {
+    width: 46px; height: 46px; border-radius: 12px; flex: none;
+    background: linear-gradient(135deg, var(--accent), #7b5cff);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 24px; font-weight: 700;
+  }
+  header h1 { font-size: 1.5rem; }
+  header p { color: var(--muted); font-size: 0.9rem; margin-top: 2px; }
+  .grid { display: grid; grid-template-columns: 360px 1fr; gap: 20px; align-items: start; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: 14px; padding: 20px;
+  }
+  .card h2 { font-size: 1.05rem; margin-bottom: 14px; }
+  label { display: block; font-size: 0.8rem; color: var(--muted); margin: 12px 0 5px; }
+  input, select {
+    width: 100%; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--border); background: #101728; color: var(--text);
+    font-size: 0.92rem; outline: none;
+  }
+  input:focus, select:focus { border-color: var(--accent); }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .hint { font-size: 0.75rem; color: var(--muted); margin-top: 4px; }
+  button.primary {
+    width: 100%; margin-top: 18px; padding: 12px; border: none; border-radius: 9px;
+    background: var(--accent); color: #fff; font-size: 1rem; font-weight: 600;
+    cursor: pointer; transition: background 0.15s;
+  }
+  button.primary:hover:not(:disabled) { background: var(--accent-hover); }
+  button.primary:disabled { opacity: 0.55; cursor: wait; }
+  button.ghost {
+    padding: 10px 16px; border-radius: 9px; cursor: pointer;
+    border: 1px solid var(--border); background: transparent; color: var(--text);
+    font-size: 0.9rem;
+  }
+  button.ghost:hover { border-color: var(--accent); }
+  button.download {
+    padding: 10px 18px; border: none; border-radius: 9px; cursor: pointer;
+    background: var(--success); color: #06281c; font-weight: 700; font-size: 0.92rem;
+  }
+  .status { margin-top: 16px; font-size: 0.88rem; min-height: 22px; }
+  .status .pill {
+    display: inline-block; padding: 3px 12px; border-radius: 20px; font-weight: 600;
+    font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.4px;
+  }
+  .pill.queued, .pill.running { background: rgba(240,180,41,.15); color: var(--warn); }
+  .pill.done { background: rgba(52,201,142,.15); color: var(--success); }
+  .pill.failed { background: rgba(240,100,100,.15); color: var(--error); }
+  .spinner {
+    display: inline-block; width: 14px; height: 14px; margin-right: 8px;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: -2px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .toolbar { display: flex; gap: 10px; align-items: center; margin-bottom: 12px; flex-wrap: wrap; }
+  .toolbar .count { color: var(--muted); font-size: 0.85rem; margin-right: auto; }
+  .toolbar input { width: 220px; }
+  .table-wrap { overflow: auto; max-height: 560px; border: 1px solid var(--border); border-radius: 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.82rem; min-width: 900px; }
+  thead th {
+    position: sticky; top: 0; background: #232e46; text-align: left;
+    padding: 10px 12px; white-space: nowrap; z-index: 1;
+  }
+  tbody td { padding: 9px 12px; border-top: 1px solid var(--border); vertical-align: top; }
+  tbody tr:hover { background: rgba(79,140,255,.06); }
+  a { color: var(--accent); }
+  .empty { color: var(--muted); text-align: center; padding: 40px 10px; }
+  .error-box { color: var(--error); font-size: 0.85rem; margin-top: 10px; }
+  footer { text-align: center; color: var(--muted); font-size: 0.78rem; margin-top: 30px; }
+  footer a { color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">&#9673;</div>
+    <div>
+      <h1>Dharampeth Business Data Extractor</h1>
+      <p>Search Google Maps listings, preview every result, download as Excel.</p>
+    </div>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <h2>New search</h2>
+      <label for="apiKey">API key</label>
+      <input id="apiKey" type="password" placeholder="X-API-Key" autocomplete="off" />
+
+      <label for="query">Business category / query</label>
+      <input id="query" type="text" value="dental clinic" placeholder="e.g. dental clinic" />
+
+      <label for="location">Location</label>
+      <input id="location" type="text" value="Dharampeth, Nagpur" placeholder="e.g. Dharampeth, Nagpur" />
+
+      <div class="row">
+        <div>
+          <label for="radius">Radius (km)</label>
+          <input id="radius" type="number" value="3" min="0.1" max="100" step="0.1" />
+        </div>
+        <div>
+          <label for="minRating">Min rating</label>
+          <select id="minRating">
+            <option value="">Any</option>
+            <option value="3">3.0+</option>
+            <option value="3.5">3.5+</option>
+            <option value="4" selected>4.0+</option>
+            <option value="4.5">4.5+</option>
+          </select>
+        </div>
+      </div>
+
+      <label for="maxResults">Max results</label>
+      <input id="maxResults" type="number" min="1" max="10000" placeholder="Blank = all results" />
+      <div class="hint">Leave blank to collect every listing Google Maps returns.</div>
+
+      <button class="primary" id="searchBtn">Search</button>
+      <div class="status" id="status"></div>
+      <div class="error-box" id="error"></div>
+    </div>
+
+    <div class="card">
+      <h2>Results</h2>
+      <div class="toolbar">
+        <span class="count" id="count">No search yet.</span>
+        <input id="filter" type="text" placeholder="Filter results..." disabled />
+        <button class="download" id="downloadBtn" disabled>Download Excel</button>
+      </div>
+      <div class="table-wrap">
+        <div class="empty" id="empty">Run a search to see all results here.</div>
+        <table id="table" style="display:none">
+          <thead><tr>
+            <th>#</th><th>Business</th><th>Category</th><th>Address</th>
+            <th>Phone</th><th>Rating</th><th>Reviews</th><th>Website</th><th>Maps link</th>
+          </tr></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <footer>API docs: <a href="/docs">/docs</a></footer>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const apiKeyEl = $("apiKey"), queryEl = $("query"), locEl = $("location"),
+      radiusEl = $("radius"), ratingEl = $("minRating"), maxEl = $("maxResults"),
+      searchBtn = $("searchBtn"), statusEl = $("status"), errorEl = $("error"),
+      countEl = $("count"), filterEl = $("filter"), dlBtn = $("downloadBtn"),
+      tableEl = $("table"), tbodyEl = $("tbody"), emptyEl = $("empty");
+
+apiKeyEl.value = localStorage.getItem("gmaps_api_key") || "";
+apiKeyEl.addEventListener("change", () => localStorage.setItem("gmaps_api_key", apiKeyEl.value.trim()));
+
+let pollTimer = null, currentJob = null, allRecords = [];
+
+function headers() { return { "Content-Type": "application/json", "X-API-Key": apiKeyEl.value.trim() }; }
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+function link(href, text) {
+  if (!href) return "";
+  const t = esc(text || href);
+  return `<a href="${esc(href)}" target="_blank" rel="noopener">${t.length > 34 ? t.slice(0, 34) + "\u2026" : t}</a>`;
+}
+
+searchBtn.addEventListener("click", async () => {
+  errorEl.textContent = "";
+  if (!apiKeyEl.value.trim()) { errorEl.textContent = "Enter your API key first."; return; }
+  if (!queryEl.value.trim() || !locEl.value.trim()) { errorEl.textContent = "Query and location are required."; return; }
+  clearInterval(pollTimer);
+  searchBtn.disabled = true; dlBtn.disabled = true; filterEl.disabled = true;
+  allRecords = []; render([]);
+  countEl.textContent = "Starting search...";
+
+  const body = { query: queryEl.value.trim(), location: locEl.value.trim() };
+  const r = parseFloat(radiusEl.value); if (!isNaN(r)) body.radius_km = r;
+  const mr = parseInt(maxEl.value, 10); if (!isNaN(mr) && mr > 0) body.max_results = mr;
+  const minR = parseFloat(ratingEl.value); if (!isNaN(minR)) body.min_rating = minR;
+
+  let res;
+  try {
+    res = await fetch("/api/v1/search", { method: "POST", headers: headers(), body: JSON.stringify(body) });
+  } catch (e) { return fail("Cannot reach server. Is it running on :8000?"); }
+  if (!res.ok) {
+    let msg = res.statusText;
+    try { msg = (await res.json()).detail || msg; } catch (_) {}
+    return fail(msg + ` (HTTP ${res.status})`);
+  }
+  currentJob = (await res.json()).job_id;
+  pollTimer = setInterval(poll, 3000);
+  poll();
+});
+
+async function poll() {
+  let d;
+  try {
+    const res = await fetch(`/api/v1/search/${currentJob}`, { headers: headers() });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    d = await res.json();
+  } catch (e) { return fail("Polling failed: " + e.message); }
+
+  if (d.status === "done") {
+    clearInterval(pollTimer);
+    searchBtn.disabled = false;
+    statusEl.innerHTML = `<span class="pill done">done</span> ${d.total_results} results`;
+    countEl.textContent = `${d.total_results} results`;
+    dlBtn.disabled = false; filterEl.disabled = false;
+    loadResults();
+  } else if (d.status === "failed") {
+    clearInterval(pollTimer);
+    searchBtn.disabled = false;
+    statusEl.innerHTML = `<span class="pill failed">failed</span>`;
+    fail(d.error || "Search failed.");
+  } else {
+    statusEl.innerHTML = `<span class="spinner"></span><span class="pill ${d.status}">${d.status}</span> collecting every listing, please wait...`;
+  }
+}
+
+async function loadResults() {
+  try {
+    const res = await fetch(`/api/v1/search/${currentJob}/results`, { headers: headers() });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    allRecords = (await res.json()).records || [];
+  } catch (e) { return fail("Could not load results: " + e.message); }
+  render(allRecords);
+}
+
+function render(records) {
+  tbodyEl.innerHTML = "";
+  if (!records.length) {
+    tableEl.style.display = "none"; emptyEl.style.display = "block";
+    if (currentJob) emptyEl.textContent = "No results for this search.";
+    return;
+  }
+  emptyEl.style.display = "none"; tableEl.style.display = "table";
+  const frag = document.createDocumentFragment();
+  records.forEach((r, i) => {
+    const tr = document.createElement("tr");
+    tr.innerHTML =
+      `<td>${i + 1}</td><td><strong>${esc(r.business_name)}</strong></td>` +
+      `<td>${esc(r.category)}</td><td>${esc(r.full_address)}</td>` +
+      `<td>${esc(r.phone_number)}</td><td>${r.rating ?? ""}</td>` +
+      `<td>${r.total_reviews ?? ""}</td>` +
+      `<td>${link(r.website)}</td><td>${link(r.google_maps_link, "Maps")}</td>`;
+    frag.appendChild(tr);
+  });
+  tbodyEl.appendChild(frag);
+  countEl.textContent = `${records.length} results`;
+}
+
+filterEl.addEventListener("input", () => {
+  const q = filterEl.value.trim().toLowerCase();
+  if (!q) return render(allRecords);
+  render(allRecords.filter((r) =>
+    [r.business_name, r.category, r.full_address, r.phone_number, r.website]
+      .some((v) => String(v ?? "").toLowerCase().includes(q))));
+});
+
+dlBtn.addEventListener("click", async () => {
+  const res = await fetch(`/api/v1/search/${currentJob}/download`, { headers: headers() });
+  if (!res.ok) return fail("Download failed.");
+  const blob = await res.blob();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `results_${currentJob.slice(0, 8)}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+});
+
+function fail(msg) {
+  clearInterval(pollTimer);
+  searchBtn.disabled = false;
+  errorEl.textContent = msg;
+  statusEl.innerHTML = "";
+}
+</script>
+</body>
+</html>
