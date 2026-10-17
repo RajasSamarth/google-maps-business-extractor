@@ -14,10 +14,9 @@ import urllib.request
 logger = logging.getLogger(__name__)
 
 OVERPASS_URLS = (
-    "https://overpass.kumi.systems/api/interpreter",
-    "https://overpass.private.coffee/api/interpreter",
     "https://overpass-api.de/api/interpreter",
-    "https://overpass.nchc.org.tw/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
 )
 
 _CACHE: dict[str, tuple[float, list[str]]] = {}
@@ -69,7 +68,7 @@ def _parse_names(payload: dict) -> list[str]:
     return names
 
 
-def discover_areas(city: str, limit: int = 30, timeout: int = 30) -> list[str]:
+def discover_areas(city: str, limit: int = 30, timeout: int = 8) -> list[str]:
     """Return up to ``limit`` area names for ``city`` (may be empty)."""
     city = (city or "").strip().replace('"', "")[:100]
     if not city or limit <= 0:
@@ -84,29 +83,20 @@ def discover_areas(city: str, limit: int = 30, timeout: int = 30) -> list[str]:
         return []
     query = _query(bbox)
     for endpoint in OVERPASS_URLS:
-        # Public mirrors 500/502 under load; retry before moving on.
-        answered = False
-        for attempt in range(3):
-            try:
-                data = urllib.parse.urlencode({"data": query}).encode()
-                req = urllib.request.Request(
-                    endpoint,
-                    data=data,
-                    headers={"User-Agent": "maps-extractor/1.0"},
-                    method="POST",
-                )
-                with urllib.request.urlopen(req, timeout=timeout) as resp:
-                    payload = json.loads(resp.read().decode("utf-8", "replace"))
-                names = _parse_names(payload)[:limit]
-                answered = True  # even [] is a valid answer; stop here
-                break
-            except Exception as exc:  # noqa: BLE001 - retry, then next mirror
-                logger.warning(
-                    "Area discovery via %s attempt %d failed: %s", endpoint, attempt + 1, exc
-                )
-                time.sleep(2 * attempt)
-        if answered:
+        try:
+            data = urllib.parse.urlencode({"data": query}).encode()
+            req = urllib.request.Request(
+                endpoint,
+                data=data,
+                headers={"User-Agent": "maps-extractor/1.0"},
+                method="POST",
+            )
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                payload = json.loads(resp.read().decode("utf-8", "replace"))
+            names = _parse_names(payload)[:limit]
             break
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Area discovery via %s failed: %s", endpoint, exc)
     # Only cache real answers: a transient outage caching [] would silently
     # disable auto-areas for hours.
     if names:

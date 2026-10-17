@@ -82,10 +82,10 @@
     "proxy_configuration": {
       "title": "Proxy Configuration",
       "type": "object",
-      "description": "Apify Proxy or custom proxies used to prevent IP bans and blocks when scraping at scale.",
+      "description": "Optional: Enable if you have Apify Residential Proxies or custom proxies. Leave disabled for standard direct connection.",
       "editor": "proxy",
       "default": {
-        "useApifyProxy": true
+        "useApifyProxy": false
       }
     },
     "use_playwright_source": {

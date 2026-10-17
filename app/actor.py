@@ -141,13 +141,16 @@ async def main() -> None:
 
         # Set up proxy if configured
         proxy_input = actor_input.get("proxy_configuration")
-        if proxy_input:
+        if proxy_input and (proxy_input.get("useApifyProxy") or proxy_input.get("proxyUrls")):
             proxy_config = await Actor.create_proxy_configuration(actor_proxy_input=proxy_input)
             if proxy_config:
                 proxy_url = await proxy_config.new_url()
                 if proxy_url:
                     os.environ["PLAYWRIGHT_PROXY"] = proxy_url
-                    Actor.log.info("Configured Apify proxy for browser requests.")
+                    Actor.log.info("Configured proxy for browser requests.")
+        else:
+            os.environ.pop("PLAYWRIGHT_PROXY", None)
+            Actor.log.info("Running with direct connection (no proxy).")
 
         # Default use_playwright_source to True unless explicitly disabled (or if mock testing)
         if "use_playwright_source" not in actor_input:

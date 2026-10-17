@@ -143,6 +143,29 @@ def _parse_latlng(url: str) -> tuple[Optional[float], Optional[float]]:
     return None, None
 
 
+def _parse_proxy(proxy_url: str) -> dict | None:
+    if not proxy_url or not proxy_url.strip():
+        return None
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(proxy_url.strip())
+        if not parsed.hostname:
+            return None
+        scheme = parsed.scheme or "http"
+        server = f"{scheme}://{parsed.hostname}"
+        if parsed.port:
+            server += f":{parsed.port}"
+        cfg: dict = {"server": server}
+        if parsed.username:
+            cfg["username"] = parsed.username
+        if parsed.password:
+            cfg["password"] = parsed.password
+        return cfg
+    except Exception as e:
+        logger.warning("Failed to parse proxy URL %r: %s", proxy_url, e)
+        return None
+
+
 class PlaywrightGoogleMapsSource(BusinessDataSource):
     headless: bool = True
     pause_sec: float = 0.6
@@ -259,9 +282,6 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
         # True when the feed gave us everything it had (stopped growing on
         # its own) as opposed to stopping because we hit `target`.
         feed_exhausted = True
-        # Detail pages are enriched N at a time: each card gets
-        # its own tab navigated straight to its Maps URL — no click/back
-        # choreography, so panes can never go stale.
         # Capped so JOB_WORKERS x CONCURRENCY <= 14.
         concurrency = _effective_concurrency(max(1, _env_int("PLAYWRIGHT_CONCURRENCY", 4)))
 
@@ -271,12 +291,15 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
                 "--disable-blink-features=AutomationControlled",
                 "--disable-dev-shm-usage",
                 "--no-sandbox",
+                "--disable-setuid-sandbox",
                 "--disable-gpu",
             ],
         }
         proxy_url = os.getenv("PLAYWRIGHT_PROXY") or os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY")
-        if proxy_url:
-            launch_kwargs["proxy"] = {"server": proxy_url}
+        proxy_cfg = _parse_proxy(proxy_url) if proxy_url else None
+        if proxy_cfg:
+            launch_kwargs["proxy"] = proxy_cfg
+            logger.info("Playwright using proxy: %s (auth: %s)", proxy_cfg["server"], bool(proxy_cfg.get("username")))
 
         async with async_playwright() as pw:
             browser = await pw.chromium.launch(**launch_kwargs)
@@ -290,19 +313,20 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
                     ),
                     viewport={"width": 1366, "height": 900},
                 )
-                # Block images/fonts/media: Maps list + detail work without them.
+                # Block heavy media: images/videos
                 try:
                     async def _block(route) -> None:
                         await route.abort()
 
                     await context.route(
-                        "**/*.{png,jpg,jpeg,gif,webp,svg,ico,woff,woff2,ttf,mp4,webm}",
+                        "**/*.{png,jpg,jpeg,gif,webp,mp4,webm}",
                         _block,
                     )
                 except Exception:
                     pass
                 page = await context.new_page()
-                await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+                goto_timeout = _env_int("PLAYWRIGHT_GOTO_TIMEOUT", 45000)
+                await page.goto(url, wait_until="domcontentloaded", timeout=goto_timeout)
                 await asyncio.sleep(self.pause_sec * 0.8)
 
                 # Dismiss consent dialog if present.
@@ -401,7 +425,7 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
                             # plus a rating pair — climbing a fixed height can
                             # overshoot into a container shared by many cards.
                             card_text = await a.evaluate(
-                                """(el, nm) => {
+                                r"""(el, nm) => {
                                     if (!nm) return '';
                                     let n = el.parentElement, best = '';
                                     while (n && n !== document.body) {
