@@ -27,6 +27,7 @@ jobs:
 
       - name: Run Pytest
         env:
+          API_KEY: "change-me-in-development"
           USE_PLAYWRIGHT_SOURCE: "0"
           RATE_LIMIT_PER_MINUTE: "10000"
           MAX_JOBS_PER_HOUR: "0"
@@ -52,7 +53,6 @@ jobs:
         uses: apify/push-actor-action@v1
         with:
           token: ${{ secrets.APIFY_TOKEN }}
-          actor-id: ${{ secrets.APIFY_ACTOR_ID }}
           build-tag: "latest"
 
       - name: Summary

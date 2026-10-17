@@ -7,7 +7,7 @@ persistent store plus a real task queue.
 import threading
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import os
 import time
 
@@ -88,12 +88,16 @@ def _data_source(max_results: int | None = None, enrich: bool = True):
     return SyntheticDataSource(total_available=87, page_size=20)
 
 
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 @dataclass
 class Job:
     job_id: str
     params: dict[str, Any]
     status: str = "queued"
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    created_at: datetime = field(default_factory=_utcnow)
     started_at: Optional[datetime] = None
     finished_at: Optional[datetime] = None
     records: list = field(default_factory=list)
@@ -114,7 +118,7 @@ def can_accept_new_job() -> bool:
 def create_job(params: dict[str, Any]) -> Job:
     """Create a (possibly cached) job and return it."""
     key = _cache_key(params)
-    now = datetime.utcnow()
+    now = _utcnow()
 
     # Cache hit: reuse the previous finished job if still fresh.
     cached_id = _CACHE.get(key)
@@ -149,7 +153,7 @@ def run_job(job_id: str) -> None:
         return
 
     job.status = "running"
-    job.started_at = datetime.utcnow()
+    job.started_at = _utcnow()
     started_at_monotonic = time.monotonic()
     params = job.params
     logger.info("Job %s running params=%s", job_id, params)
@@ -230,7 +234,7 @@ def run_job(job_id: str) -> None:
             query=", ".join(queries),
             location=", ".join(locations),
             radius_km=radius,
-            timestamp=datetime.utcnow().isoformat(timespec="seconds"),
+            timestamp=_utcnow().isoformat(timespec="seconds"),
             total_results=len(cleaned),
         )
 
@@ -250,7 +254,7 @@ def run_job(job_id: str) -> None:
         # Cache the finished result for 24 hours.
         key = _cache_key(params)
         _CACHE[key] = job.job_id
-        _CACHE_EXPIRY[key] = datetime.utcnow() + timedelta(hours=24)
+        _CACHE_EXPIRY[key] = _utcnow() + timedelta(hours=24)
 
         if error is not None and not cleaned:
             job.status = "failed"
@@ -270,7 +274,7 @@ def run_job(job_id: str) -> None:
         job.status = "failed"
         job.error = str(exc)
     finally:
-        job.finished_at = datetime.utcnow()
+        job.finished_at = _utcnow()
         duration = time.monotonic() - started_at_monotonic
         logger.info(
             "Job %s finished status=%s total=%d duration=%.2fs error=%s",
