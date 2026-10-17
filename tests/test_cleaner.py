@@ -43,6 +43,21 @@ def test_deduplicate_composite_without_place_id():
     assert [r.business_name for r in out] == ["Clinic X", "Clinic Y"]
 
 
+def test_deduplicate_keeps_same_name_branches_without_address():
+    # Fast list-only mode has no address/phone: same chain name at
+    # different coords/links must NOT collapse.
+    recs = [
+        BusinessRecord(business_name="Domino's", latitude=21.1, longitude=79.0,
+                       google_maps_link="https://maps/x1"),
+        BusinessRecord(business_name="Domino's", latitude=21.2, longitude=79.1,
+                       google_maps_link="https://maps/x2"),
+        BusinessRecord(business_name="Domino's", latitude=21.1, longitude=79.0,
+                       google_maps_link="https://maps/x1"),  # true dup
+    ]
+    out = deduplicate(recs)
+    assert len(out) == 2
+
+
 def test_filter_by_rating():
     recs = [
         BusinessRecord(business_name="A", rating=4.0),

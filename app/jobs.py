@@ -156,7 +156,7 @@ def run_job(job_id: str) -> None:
     try:
         # For now we use the synthetic approved source. Swap this for the real
         # adapter once the data source has been authorized.
-        source = _data_source(max_results=params.get("max_results"),
+        source = _data_source(max_results=None,
                               enrich=params.get("enrich_details", True))
 
         radius = params.get("radius_km")
@@ -184,7 +184,7 @@ def run_job(job_id: str) -> None:
             from app.services.areas import discover_areas, extract_city
 
             city = extract_city(params["location"])
-            found = discover_areas(city, limit=params.get("max_areas") or 30)
+            found = discover_areas(city, limit=params.get("max_areas") or 50)
             for area in found:
                 label = area if not city or city.lower() in area.lower() else f"{area}, {city}"
                 if label not in locations:
@@ -195,29 +195,34 @@ def run_job(job_id: str) -> None:
 
         all_raw: list = []
         error = None
+        # Full fan-out: scrape EVERY query x location feed to exhaustion
+        # (Google caps one feed at ~120), merge everything, dedupe, and
+        # only then trim to max_results. Sharing one max_results budget
+        # across areas starved later areas (first area ate the budget and
+        # the rest were skipped/partial) — that capped city sweeps at a
+        # single feed's worth (~69).
         for q in queries:
             for loc in locations:
-                remaining = None if max_results is None else max_results - len(all_raw)
-                if remaining is not None and remaining <= 0:
-                    break
                 page_records, page_error, _meta = collect(
                     source=source,
                     query=q,
                     location=loc,
                     radius_km=radius,
-                    max_results=remaining,
+                    max_results=None,
                     page_size=20,
                 )
                 all_raw.extend(page_records or [])
                 if page_error is not None:
                     error = page_error
                 logger.info("Job %s %r @ %r: %d records (total %d)", job_id, q, loc, len(page_records or []), len(all_raw))
-            if remaining is not None and remaining <= 0:
-                break
 
         records = all_raw
 
         cleaned = clean_records(records, min_rating=min_rating)
+        # Apply max_results AFTER merge + dedupe so it limits unique
+        # results, not raw pages from the first area.
+        if max_results is not None:
+            cleaned = cleaned[:max_results]
 
         from app.schemas import SearchInfo
 
@@ -257,6 +262,9 @@ def run_job(job_id: str) -> None:
                 notes.append(f"Partial failure: {error}")
             if discovery_note:
                 notes.append(discovery_note)
+            skipped = sum(1 for r in cleaned if getattr(r, "detail_failed", False))
+            if skipped:
+                notes.append(f"{skipped}/{len(cleaned)} listings partial (detail tab skipped)")
             job.error = "; ".join(notes) if notes else None
     except Exception as exc:  # noqa: BLE001
         job.status = "failed"

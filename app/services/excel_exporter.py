@@ -10,7 +10,8 @@ from openpyxl.utils import get_column_letter
 from app.schemas import BusinessRecord, SearchInfo
 
 
-# Exact column names and order required by the project/problem statement.
+# Exact column names and order required by the project/problem statement,
+# plus a trailing status column showing skipped detail tabs.
 COLUMNS = [
     "Sr. No.",
     "Business Name",
@@ -27,6 +28,7 @@ COLUMNS = [
     "Latitude, Longitude",
     "Google Maps Link",
     "Place ID",
+    "Detail Status",
 ]
 
 
@@ -82,6 +84,10 @@ def _coords(record_dict: dict) -> str | None:
     return f"{lat}, {lon}"
 
 
+def _detail_status(record_dict: dict) -> str:
+    return "Skipped" if record_dict.get("detail_failed") else "Complete"
+
+
 def _row_from_record(index: int, record) -> list:
     d = _as_dict(record)
     return [
@@ -100,6 +106,7 @@ def _row_from_record(index: int, record) -> list:
         _coords(d),
         _clean(d.get("google_maps_link")),
         _clean(d.get("place_id")),
+        _detail_status(d),
     ]
 
 
@@ -145,7 +152,7 @@ def export_to_excel(records, search_info, output_dir="output", filename_location
         ws.append(_row_from_record(i, rec))
 
     # Light column-width tuning (optional, keeps sheet readable)
-    widths = [8, 28, 20, 40, 22, 18, 16, 30, 8, 10, 26, 16, 22, 40, 24]
+    widths = [8, 28, 20, 40, 22, 18, 16, 30, 8, 10, 26, 16, 22, 40, 24, 14]
     for idx, w in enumerate(widths, start=1):
         ws.column_dimensions[get_column_letter(idx)].width = w
 

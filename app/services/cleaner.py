@@ -53,6 +53,16 @@ def _to_str(value: Any) -> Optional[str]:
     return text if text != "" else None
 
 
+def _to_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "y", "skipped", "failed")
+    return False
+
+
 def normalize_record(raw: Any) -> BusinessRecord:
     """Convert a raw dict / BusinessRecord into a canonical BusinessRecord."""
     if isinstance(raw, BusinessRecord):
@@ -76,14 +86,18 @@ def normalize_record(raw: Any) -> BusinessRecord:
         longitude=_to_float(raw.get("longitude")),
         google_maps_link=_to_str(raw.get("google_maps_link")),
         place_id=_to_str(raw.get("place_id")),
+        detail_failed=_to_bool(raw.get("detail_failed")),
     )
 
 
 def deduplicate(records: Iterable[BusinessRecord]) -> list[BusinessRecord]:
     """Remove duplicates using Place ID when available.
 
-    Records without a Place ID are de-duplicated by a (name, address) key so
-    obvious repeats are still collapsed. This is a best-effort heuristic.
+    Fallback order: place_id -> google_maps_link -> composite key.
+    The old (name, address) fallback collapsed same-name chain branches
+    in fast list-only mode where full_address is None (every "Domino's"
+    became one record). The composite now includes link/coords/phone so
+    only truly identical listings collapse.
     """
     seen_place_ids: set[str] = set()
     seen_composite: set[str] = set()
@@ -95,14 +109,26 @@ def deduplicate(records: Iterable[BusinessRecord]) -> list[BusinessRecord]:
                 continue
             seen_place_ids.add(rec.place_id)
         else:
+            # Identity key only: name + address + phone + coords + link.
+            # area_locality / category / website are sweep metadata or
+            # chain-shared and must NOT distinguish listings.
             key = (
                 (rec.business_name or "").strip().lower(),
                 (rec.full_address or "").strip().lower(),
+                (rec.phone_number or "").strip().lower(),
+                str(rec.latitude or ""),
+                str(rec.longitude or ""),
+                (rec.google_maps_link or "").strip(),
             )
-            # Only dedupe on composite key when we have at least a name.
-            if key[0] and key in seen_composite:
+            # A bare name alone (fast mode with no address/coords/link)
+            # must never collapse branches — keep it.
+            if not key[0]:
+                result.append(rec)
                 continue
-            if key[0]:
+            has_signal = any(key[1:])
+            if has_signal and key in seen_composite:
+                continue
+            if has_signal:
                 seen_composite.add(key)
         result.append(rec)
     return result

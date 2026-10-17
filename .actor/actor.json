@@ -1,0 +1,16 @@
+{
+  "actorSpecification": 1,
+  "name": "google-maps-business-extractor",
+  "title": "Google Maps Business Data Extractor",
+  "description": "Extract comprehensive Google Maps business listings including phone numbers, websites, ratings, reviews count, opening hours, coordinates, and full addresses. Exports to Apify Dataset (JSON/CSV) and formatted Excel spreadsheet.",
+  "version": "1.0",
+  "buildTag": "latest",
+  "meta": {
+    "templateId": "python-playwright"
+  },
+  "dockerfile": "./Dockerfile",
+  "input": "./input_schema.json",
+  "readme": "../README.md",
+  "defaultMemoryMbytes": 2048,
+  "minMemoryMbytes": 1024
+}

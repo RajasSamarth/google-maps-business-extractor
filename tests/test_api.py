@@ -116,15 +116,16 @@ def test_multi_area_search_merges_areas():
             break
         time.sleep(0.1)
 
-    # Synthetic source holds 87 per area, but its fake place_ids repeat
-    # across areas (odd n share place_{n}, plus one place_dup), so 8 of
-    # Area Two's 13 overlap and dedupe out: 87 + 13 - 8 = 92.
-    # Live place_ids are globally unique, so no such overlap occurs.
+    # Full fan-out: each area is scraped to exhaustion (87 synthetic rows),
+    # then merged + deduped + trimmed to max_results. Synthetic fake
+    # place_ids repeat across areas (odd n share place_{n}, plus one
+    # place_dup), so 44 + 1 of Area Two collapse: 87 + 87 - 45 = 129,
+    # trimmed to max_results=100.
     assert status_data["status"] == "done"
-    assert status_data["total_results"] == 92
+    assert status_data["total_results"] == 100
 
     payload = client.get(f"/api/v1/search/{job_id}/results").json()
-    assert len(payload["records"]) == 92
+    assert len(payload["records"]) == 100
     addresses = " | ".join(r.get("full_address") or "" for r in payload["records"])
     assert "Area One" in addresses
     assert "Area Two" in addresses
@@ -146,13 +147,14 @@ def test_multi_query_search_merges_queries():
             break
         time.sleep(0.1)
 
-    # 87 from the main query + 3 from the variant, minus 2 shared fake
-    # place_ids (place_1, place_3) that dedupe out = 88.
+    # Full fan-out per query (87 + 87 = 174 raw), deduped across the
+    # shared fake place_ids (44 odd + 1 dup collapse = 129 unique),
+    # then trimmed to max_results=90.
     assert status_data["status"] == "done"
-    assert status_data["total_results"] == 88
+    assert status_data["total_results"] == 90
 
     payload = client.get(f"/api/v1/search/{job_id}/results").json()
-    assert len(payload["records"]) == 88
+    assert len(payload["records"]) == 90
     categories = set(r.get("category") for r in payload["records"])
     assert categories == {"restaurants", "cafes"}
 

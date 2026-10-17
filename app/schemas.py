@@ -26,6 +26,9 @@ class BusinessRecord:
     longitude: Optional[float] = None
     google_maps_link: Optional[str] = None
     place_id: Optional[str] = None
+    # True when the detail tab failed and only list-level data survived
+    # (phone/website/hours may be missing). False = fully enriched.
+    detail_failed: bool = False
 
     def to_dict(self) -> dict:
         """Return a plain dictionary copy of this record."""

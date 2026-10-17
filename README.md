@@ -140,8 +140,66 @@ remains available for development and testing with `USE_PLAYWRIGHT_SOURCE=0`.
 pytest
 ```
 
+## Deploying to Apify via GitHub & CI/CD
+
+This project is configured to run as an **Apify Actor** with full GitHub Actions CI/CD automation.
+
+### Apify Actor Features
+- **Apify Dataset**: All scraped and cleaned business records are pushed directly into Apify's Default Dataset (downloadable as JSON, CSV, XML, Excel).
+- **Key-Value Store**: Generates a formatted multi-sheet Excel file (`OUTPUT.xlsx`) and saves it directly to the run's Key-Value store.
+- **Proxy Support**: Supports Apify Residential / Datacenter Proxies and custom proxies via the Apify UI input schema or `PLAYWRIGHT_PROXY` / `HTTP_PROXY`.
+- **Apify Console UI**: Fully defined input schema in `.actor/input_schema.json` with user-friendly fields for search queries, locations, radius, ratings, and multi-area sweeps.
+
+### Setup GitHub CI/CD Deployment
+
+Whenever you push to the `main` branch, the workflow [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) runs tests and deploys the Actor to Apify automatically.
+
+#### 1. Retrieve your Apify API Token
+1. Log in to [Apify Console](https://console.apify.com/).
+2. Navigate to **Settings** -> [**Integrations**](https://console.apify.com/settings/integrations).
+3. Copy your personal **API Token**.
+
+#### 2. Configure GitHub Secrets
+1. In your GitHub repository, open **Settings** -> **Secrets and variables** -> **Actions**.
+2. Click **New repository secret**.
+3. Name: `APIFY_TOKEN`
+4. Value: `<your-apify-token>`
+5. *(Optional)* Name: `APIFY_ACTOR_ID` (e.g. `your-username/google-maps-business-extractor` if you want to deploy to a specific existing Actor). If omitted, Apify CLI uses the name defined in `.actor/actor.json`.
+
+#### 3. Trigger Deployment
+- **Automatic:** Push any commit to the `main` branch.
+  ```bash
+  git add .
+  git commit -m "Configure Apify Actor and CI/CD"
+  git push origin main
+  ```
+- **Manual:** Go to **Actions** in your GitHub repository, select **Deploy Actor to Apify**, and click **Run workflow**.
+
+### Alternative: Native Apify GitHub Integration
+You can also connect GitHub directly in Apify:
+1. In [Apify Console](https://console.apify.com/actors), click **Create new** -> **Web & Git**.
+2. Select **GitHub repository** and authorize your repo.
+3. Apify will automatically rebuild on every commit to `main`.
+
+### Testing the Actor Locally
+
+You can test the Apify Actor locally using python or the Apify CLI:
+
+```powershell
+.venv\Scripts\Activate.ps1
+
+# Run with synthetic test source (no browser launch):
+$env:USE_PLAYWRIGHT_SOURCE="0"
+python -m app.actor
+
+# Run with live Playwright scraper:
+$env:USE_PLAYWRIGHT_SOURCE="1"
+python -m app.actor
+```
+
+Local results will be saved in `storage/datasets/default` and `storage/key_value_stores/default/OUTPUT.xlsx`.
+
 ## Notes / limitations
 
-- Job state and cache are in-memory and single-process.
-- File cleanup and caching are local-development grade.
-- Synthetic data is used until an authorized data source is integrated.
+- Job state and cache in the FastAPI server are in-memory and single-process.
+- When running on Apify, state and storage are persisted natively by the Apify platform.

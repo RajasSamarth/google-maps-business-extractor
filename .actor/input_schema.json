@@ -1,0 +1,102 @@
+{
+  "title": "Google Maps Business Extractor Input",
+  "description": "Configure search query, target location, and extraction parameters for Google Maps business listings.",
+  "type": "object",
+  "schemaVersion": 1,
+  "properties": {
+    "query": {
+      "title": "Search Query",
+      "type": "string",
+      "description": "Category or keyword to search for on Google Maps (e.g. 'dental clinic', 'restaurants', 'gym').",
+      "editor": "textfield",
+      "prefill": "dental clinic"
+    },
+    "location": {
+      "title": "Location",
+      "type": "string",
+      "description": "City, locality, area, or landmark (e.g. 'Dharampeth, Nagpur', 'New York, NY').",
+      "editor": "textfield",
+      "prefill": "Dharampeth, Nagpur"
+    },
+    "max_results": {
+      "title": "Max Results",
+      "type": "integer",
+      "description": "Maximum number of listings to extract. Leave empty or set to null to collect all available listings in the feed.",
+      "editor": "number",
+      "default": 100,
+      "minimum": 1,
+      "maximum": 10000,
+      "nullable": true
+    },
+    "min_rating": {
+      "title": "Minimum Rating",
+      "type": "number",
+      "description": "Filter listings to only include businesses with at least this star rating (e.g. 4.0).",
+      "editor": "number",
+      "default": 0,
+      "minimum": 0,
+      "maximum": 5,
+      "nullable": true
+    },
+    "enrich_details": {
+      "title": "Enrich Full Details",
+      "type": "boolean",
+      "description": "When enabled, visits each business page to extract phone numbers, website URLs, and full opening hours. Uncheck for ultra-fast list-level extraction.",
+      "default": true
+    },
+    "auto_areas": {
+      "title": "Auto-Discover City Areas",
+      "type": "boolean",
+      "description": "Automatically discover and sweep all localities across the city via OpenStreetMap to achieve complete city-wide coverage beyond Google's 120-listing feed limit.",
+      "default": false
+    },
+    "max_areas": {
+      "title": "Max Areas to Sweep",
+      "type": "integer",
+      "description": "Maximum number of auto-discovered city localities to sweep in one run.",
+      "editor": "number",
+      "default": 30,
+      "minimum": 1,
+      "maximum": 100
+    },
+    "extra_locations": {
+      "title": "Additional Locations",
+      "type": "array",
+      "description": "List of additional areas or localities to scrape and merge in this run.",
+      "editor": "json",
+      "default": []
+    },
+    "extra_queries": {
+      "title": "Additional Query Keywords",
+      "type": "array",
+      "description": "List of additional query keyword variations to sweep and merge.",
+      "editor": "json",
+      "default": []
+    },
+    "export_excel": {
+      "title": "Save Formatted Excel File",
+      "type": "boolean",
+      "description": "Generate a professionally styled multi-sheet Excel file (.xlsx) and save it to the Apify Key-Value Store as 'OUTPUT.xlsx'.",
+      "default": true
+    },
+    "proxy_configuration": {
+      "title": "Proxy Configuration",
+      "type": "object",
+      "description": "Apify Proxy or custom proxies used to prevent IP bans and blocks when scraping at scale.",
+      "editor": "proxy",
+      "default": {
+        "useApifyProxy": true
+      }
+    },
+    "use_playwright_source": {
+      "title": "Use Live Playwright Scraper",
+      "type": "boolean",
+      "description": "True to run live Google Maps scraping via Playwright Chromium. Set to false for synthetic demo testing.",
+      "default": true
+    }
+  },
+  "required": [
+    "query",
+    "location"
+  ]
+}

@@ -8,3 +8,5 @@ output/
 *.log
 .vscode/
 .idea/
+storage/
+apify_storage/

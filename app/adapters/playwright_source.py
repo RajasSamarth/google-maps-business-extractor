@@ -44,6 +44,26 @@ def _env_int(name: str, default: int) -> int:
 _request_timestamps: list[float] = []
 _MAX_PER_MINUTE = 30
 
+# Safety cap: JOB_WORKERS x PLAYWRIGHT_CONCURRENCY must stay <= 14
+# to avoid overloading the device (RAM/CPU + Google 429s).
+MAX_PARALLEL_PAGES = 14
+
+
+def _effective_concurrency(configured: int) -> int:
+    """Clamp per-job concurrency so workers x concurrency <= 14."""
+    try:
+        workers = int(os.getenv("JOB_WORKERS", "3") or "3")
+    except (TypeError, ValueError):
+        workers = 3
+    workers = max(1, workers)
+    allowed = max(1, MAX_PARALLEL_PAGES // workers)
+    if configured > allowed:
+        logger.info(
+            "Clamping PLAYWRIGHT_CONCURRENCY %d -> %d (JOB_WORKERS=%d, cap=%d)",
+            configured, allowed, workers, MAX_PARALLEL_PAGES,
+        )
+    return max(1, min(configured, allowed))
+
 _LIST_CACHE: dict[tuple, tuple[float, list[dict], bool]] = {}
 _LIST_CACHE_TTL = 600.0  # 10 minutes
 
@@ -239,17 +259,27 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
         # True when the feed gave us everything it had (stopped growing on
         # its own) as opposed to stopping because we hit `target`.
         feed_exhausted = True
-        # Detail pages are enriched N at a time (default 4): each card gets
+        # Detail pages are enriched N at a time: each card gets
         # its own tab navigated straight to its Maps URL — no click/back
         # choreography, so panes can never go stale.
-        concurrency = max(1, _env_int("PLAYWRIGHT_CONCURRENCY", 4))
+        # Capped so JOB_WORKERS x CONCURRENCY <= 14.
+        concurrency = _effective_concurrency(max(1, _env_int("PLAYWRIGHT_CONCURRENCY", 4)))
+
+        launch_kwargs = {
+            "headless": self.headless,
+            "args": [
+                "--disable-blink-features=AutomationControlled",
+                "--disable-dev-shm-usage",
+                "--no-sandbox",
+                "--disable-gpu",
+            ],
+        }
+        proxy_url = os.getenv("PLAYWRIGHT_PROXY") or os.getenv("HTTP_PROXY") or os.getenv("HTTPS_PROXY")
+        if proxy_url:
+            launch_kwargs["proxy"] = {"server": proxy_url}
 
         async with async_playwright() as pw:
-            browser = await pw.chromium.launch(
-                headless=self.headless,
-                args=["--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage",
-                      "--no-sandbox", "--disable-gpu"],
-            )
+            browser = await pw.chromium.launch(**launch_kwargs)
             try:
                 context = await browser.new_context(
                     locale="en-IN",
@@ -402,6 +432,7 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
                         card["area_locality"] = location.split(",")[0].strip()
                         card["city_pincode"] = location
                         card["business_status"] = "Operational"
+                        card["detail_failed"] = True
                         if card.get("business_name"):
                             records.append(card)
                     logger.info("Scraped %d list-level records for %r (fast mode)", len(records), search)
@@ -412,16 +443,17 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
                 # pane can never go stale). Concurrency via env, default 4.
                 sema = asyncio.Semaphore(concurrency)
 
-                def _snapshot(card: dict) -> dict | None:
+                def _snapshot(card: dict, failed: bool = True) -> dict | None:
                     snap = {k: v for k, v in card.items() if v is not None}
                     snap.pop("_href", None)
                     snap["category"] = snap.get("category") or query
+                    snap["detail_failed"] = failed
                     return snap if snap.get("business_name") else None
 
                 async def _enrich_one(card: dict, idx: int) -> dict | None:
                     href = card.get("_href") or card.get("google_maps_link")
                     if not href:
-                        return _snapshot(card)
+                        return _snapshot(card, failed=True)
                     dpage = await context.new_page()
                     try:
                         await dpage.goto(href, wait_until="domcontentloaded", timeout=30000)
@@ -440,10 +472,11 @@ class PlaywrightGoogleMapsSource(BusinessDataSource):
                             merged["area_locality"] = location.split(",")[0].strip()
                         if addr and not merged.get("city_pincode"):
                             merged["city_pincode"] = location
-                        return merged if merged.get("business_name") else _snapshot(card)
+                        merged["detail_failed"] = False
+                        return merged if merged.get("business_name") else _snapshot(card, failed=True)
                     except Exception as exc:
-                        logger.debug("Detail enrich %d failed: %s", idx, exc)
-                        return _snapshot(card)
+                        logger.warning("Detail enrich %d failed, using list data: %s", idx, exc)
+                        return _snapshot(card, failed=True)
                     finally:
                         try:
                             await dpage.close()
